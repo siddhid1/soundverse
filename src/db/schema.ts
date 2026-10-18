@@ -1,10 +1,13 @@
 import {
+  boolean,
+  doublePrecision,
   integer,
   jsonb,
   pgTable,
   text,
   timestamp,
   uuid,
+  date,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -97,4 +100,67 @@ export const auditLogs = pgTable("audit_logs", {
   keyId: uuid("key_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   metadata: jsonb("metadata"),
+});
+
+/**
+ * Phase 3 entities. See drizzle/0002_phase3_generations.sql for constraints
+ * and the ledger accounting semantics; this mirrors it for typed queries.
+ */
+export const generations = pgTable("generations", {
+  id: text("id").primaryKey(),
+  accountId: uuid("account_id").notNull(),
+  keyId: uuid("key_id"),
+  status: text("status").notNull().default("queued"),
+  prompt: text("prompt").notNull(),
+  durationSec: integer("duration_sec").notNull(),
+  license: text("license").notNull(),
+  instrumental: boolean("instrumental").notNull().default(true),
+  metadata: jsonb("metadata"),
+  reservedCredits: integer("reserved_credits").notNull(),
+  chargedCredits: integer("charged_credits"),
+  provider: text("provider"),
+  model: text("model"),
+  providerJobId: text("provider_job_id"),
+  objectKey: text("object_key"),
+  outputDurationSec: doublePrecision("output_duration_sec"),
+  outputFormat: text("output_format"),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  attempts: integer("attempts").notNull().default(0),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  periodStart: date("period_start").notNull(),
+});
+
+export const idempotencyRecords = pgTable("idempotency_records", {
+  id: uuid("id").primaryKey(),
+  accountId: uuid("account_id").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  requestHash: text("request_hash").notNull(),
+  generationId: text("generation_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+export const usageLedger = pgTable("usage_ledger", {
+  id: uuid("id").primaryKey(),
+  accountId: uuid("account_id").notNull(),
+  keyId: uuid("key_id"),
+  generationId: text("generation_id"),
+  type: text("type").notNull(),
+  amount: integer("amount").notNull(),
+  periodStart: date("period_start").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  metadata: jsonb("metadata"),
+});
+
+export const rateCounters = pgTable("rate_counters", {
+  accountId: uuid("account_id").notNull(),
+  granularity: text("granularity").notNull(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  count: integer("count").notNull().default(1),
 });

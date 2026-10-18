@@ -35,19 +35,38 @@ export function buildError(
 }
 
 /** Map internal error codes to HTTP status codes. Documented in OpenAPI. */
-export const codeToStatus: Record<string, number> = {  invalid_key: 401,
+export const codeToStatus: Record<string, number> = {
+  // 400
+  validation_failed: 400,
+  idempotency_key_required: 400,
+  invalid_scope: 400,
+  invalid_mode: 400,
+  invalid_or_expired_token: 400,
+  // 401
+  invalid_key: 401,
   missing_auth: 401,
+  invalid_credentials: 401,
+  session_expired: 401,
+  // 403
   insufficient_scope: 403,
   license_not_allowed: 403,
-  test_key_forbidden: 403,
+  live_not_allowed: 403,
+  email_not_verified: 403,
+  // 404
   not_found: 404,
+  key_not_found: 404,
+  generation_not_found: 404,
+  // 409
+  email_taken: 409,
+  key_revoked: 409,
   idempotency_key_reuse: 409,
   state_conflict: 409,
+  // 429
   parallel_limit_reached: 429,
   hourly_rate_limit: 429,
   daily_rate_limit: 429,
   allowance_exceeded: 429,
-  validation_failed: 400,
+  // 5xx
   provider_error: 502,
   provider_timeout: 504,
 };
