@@ -67,7 +67,7 @@ const JOB_COLS = `id, account_id, key_id, status, prompt, duration_sec, license,
   output_duration_sec, output_format, error_code, error_message, attempts,
   cancel_requested_at, created_at, updated_at, completed_at, period_start`;
 
-async function getPlan(q: Queryable, planId: string): Promise<PlanLimits> {
+export async function getPlan(q: Queryable, planId: string): Promise<PlanLimits> {
   const res = await q.query(
     `SELECT id, monthly_allowance_credits, parallel_generations, requests_per_hour,
             requests_per_day, allowed_licenses, overage_policy
@@ -189,7 +189,7 @@ export interface CreateResult {
  */
 export async function createGeneration(
   pool: Pool = getPool(),
-  opts: { auth: AuthContext; idempotencyKey?: string; input: GenerationInput },
+  opts: { auth: AuthContext; idempotencyKey?: string | undefined; input: GenerationInput },
 ): Promise<CreateResult> {
   const { auth, input } = opts;
   const rawKey = opts.idempotencyKey?.trim() ?? "";
@@ -375,7 +375,7 @@ export interface ListResult {
 
 export async function listGenerations(
   pool: Pool = getPool(),
-  opts: { accountId: string; status?: string; limit: number; offset: number },
+  opts: { accountId: string; status?: string | undefined; limit: number; offset: number },
 ): Promise<ListResult> {
   const limit = Math.min(Math.max(opts.limit, 1), 100);
   const offset = Math.max(opts.offset, 0);

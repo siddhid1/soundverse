@@ -20,6 +20,8 @@ export function sendServiceError(reply: FastifyReply, err: unknown, fallbackRequ
   if (typeof code === "string" && knownStatus(code) !== undefined) {
     const status = knownStatus(code)!;
     const message = (err as Error).message || "Request failed.";
+    const retryAfter = (err as { retryAfterSec?: number }).retryAfterSec;
+    if (retryAfter !== undefined) void reply.header("Retry-After", retryAfter);
     void reply.code(status).send(buildError(typeForStatus(status) as never, code, message, requestId));
     return;
   }

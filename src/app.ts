@@ -5,6 +5,7 @@ import { buildError, statusForCode } from "./lib/errors.js";
 import { registerRequestHooks, requestIdFor } from "./lib/request.js";
 import { authRoutes } from "./routes/auth.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
+import { generationRoutes } from "./routes/generations.js";
 import { healthRoutes } from "./routes/health.js";
 import { keyRoutes } from "./routes/keys.js";
 import { v1PingRoutes } from "./routes/v1ping.js";
@@ -60,8 +61,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(keyRoutes);
   await app.register(dashboardRoutes);
   await app.register(v1PingRoutes);
-  // Phase 3: generations, usage, idempotency, ledger.
-  // Phase 5: webhook endpoints + dispatcher.
+  await app.register(generationRoutes);
+  // Phase 4: worker claims + provider + storage. Phase 5: webhook endpoints.
 
   // Helper used by future modules to send canonical errors.
   app.decorate("apiError", (reply: unknown, code: string, message: string, requestId: string) => {
