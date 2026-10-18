@@ -58,9 +58,22 @@ const envSchema = z.object({
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
   PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   MOCK_LATENCY_MS: z.coerce.number().int().nonnegative().default(2000),
+  // Dev/compose default: each mock generation sleeps a random 40-60s so the
+  // async lifecycle (progress + webhooks) is observable. Set MAX to 0 to fall
+  // back to the fixed MOCK_LATENCY_MS (e.g. for fast local iteration).
+  MOCK_LATENCY_MIN_MS: z.coerce.number().int().nonnegative().default(40_000),
+  MOCK_LATENCY_MAX_MS: z.coerce.number().int().nonnegative().default(60_000),
   MOCK_FAIL_RATE: z.coerce.number().min(0).max(1).default(0),
 
   APP_BASE_URL: z.string().default("http://localhost:3000"),
+}).superRefine((env, ctx) => {
+  if (env.MOCK_LATENCY_MAX_MS > 0 && env.MOCK_LATENCY_MIN_MS > env.MOCK_LATENCY_MAX_MS) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["MOCK_LATENCY_MIN_MS"],
+      message: "MOCK_LATENCY_MIN_MS must be <= MOCK_LATENCY_MAX_MS (or set MAX to 0 to disable the range)",
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

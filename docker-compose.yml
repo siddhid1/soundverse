@@ -102,6 +102,9 @@ services:
       S3_SECRET_KEY: minioadmin
       S3_FORCE_PATH_STYLE: "true"
       PROVIDER: mock
+      # Random 40-60s per mock render so the async lifecycle is observable.
+      MOCK_LATENCY_MIN_MS: "40000"
+      MOCK_LATENCY_MAX_MS: "60000"
       SESSION_SECRET: dev-session-secret-change-me-32chars
       WEBHOOK_CRYPT_KEY: dev-webhook-crypt-key-change-me!!
     command: sh -c "node dist/worker.js"

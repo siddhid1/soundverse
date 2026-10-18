@@ -1,12 +1,20 @@
 import { getEnv } from "./config/env.js";
 import { getPool } from "./db/index.js";
 import { ElevenLabsMusicProvider } from "./providers/elevenlabs.js";
-import { MockMusicProvider } from "./providers/mock.js";
+import { MockMusicProvider, type MockProviderOptions } from "./providers/mock.js";
 import { s3StoreFromEnv } from "./storage/s3.js";
 import { processOnce, recoverExpiredJobs, type EngineOptions } from "./worker/engine.js";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function mockOptions(env: ReturnType<typeof getEnv>): MockProviderOptions {
+  const base = { latencyMs: env.MOCK_LATENCY_MS, failRate: env.MOCK_FAIL_RATE };
+  if (env.MOCK_LATENCY_MAX_MS > 0) {
+    return { ...base, latencyRangeMs: [env.MOCK_LATENCY_MIN_MS, env.MOCK_LATENCY_MAX_MS] };
+  }
+  return base;
 }
 
 async function main(): Promise<void> {
@@ -17,7 +25,7 @@ async function main(): Promise<void> {
   const pool = getPool();
   const eng: EngineOptions = {
     store: s3StoreFromEnv(),
-    testProvider: new MockMusicProvider({ latencyMs: env.MOCK_LATENCY_MS, failRate: env.MOCK_FAIL_RATE }),
+    testProvider: new MockMusicProvider(mockOptions(env)),
     liveProvider:
       env.PROVIDER === "elevenlabs"
         ? new ElevenLabsMusicProvider({
@@ -25,7 +33,7 @@ async function main(): Promise<void> {
             baseUrl: env.ELEVENLABS_BASE_URL,
             modelId: env.ELEVENLABS_MUSIC_MODEL,
           })
-        : new MockMusicProvider({ latencyMs: env.MOCK_LATENCY_MS, failRate: env.MOCK_FAIL_RATE }),
+        : new MockMusicProvider(mockOptions(env)),
     leaseSec: env.WORKER_LEASE_SEC,
     maxAttempts: env.WORKER_MAX_ATTEMPTS,
     providerTimeoutMs: env.PROVIDER_TIMEOUT_MS,
@@ -37,8 +45,12 @@ async function main(): Promise<void> {
   };
   process.on("SIGTERM", stop("SIGTERM"));
   process.on("SIGINT", stop("SIGINT"));
+  const latencyDesc =
+    env.MOCK_LATENCY_MAX_MS > 0
+      ? `${env.MOCK_LATENCY_MIN_MS}-${env.MOCK_LATENCY_MAX_MS}ms random`
+      : `${env.MOCK_LATENCY_MS}ms fixed`;
   console.log(
-    `[worker] up (provider=${env.PROVIDER}, lease=${env.WORKER_LEASE_SEC}s, maxAttempts=${env.WORKER_MAX_ATTEMPTS})`,
+    `[worker] up (provider=${env.PROVIDER}, lease=${env.WORKER_LEASE_SEC}s, maxAttempts=${env.WORKER_MAX_ATTEMPTS}, mockLatency=${latencyDesc})`,
   );
   while (running) {
     try {

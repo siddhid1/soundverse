@@ -2,8 +2,12 @@ import { createHash } from "node:crypto";
 import { ProviderError, type GenerateParams, type MusicProvider, type ProviderResult } from "./types.js";
 
 export interface MockProviderOptions {
-  /** Simulated generation time. Tests pass small values; dev default is 2s. */
+  /** Fixed simulated generation time. Ignored when latencyRangeMs is set.
+   *  Tests pass small values; dev default is 2s. */
   latencyMs: number;
+  /** When set, each call sleeps a uniform random time in [min, max] ms instead
+   *  of the fixed latencyMs — used in dev/compose to mimic a real render. */
+  latencyRangeMs?: [number, number];
   /** Fraction [0,1] of calls that fail. Tests set 0 or 1 deterministically. */
   failRate: number;
   /** Fixed seed for failure sampling; defaults to hashing the request id so
@@ -64,15 +68,25 @@ export class MockMusicProvider implements MusicProvider {
   readonly name = "mock";
   constructor(private readonly opts: MockProviderOptions) {}
 
+  /** Fixed latency, or a fresh uniform sample in [min, max] per call. */
+  private pickLatencyMs(): number {
+    const range = this.opts.latencyRangeMs;
+    if (!range) return this.opts.latencyMs;
+    const [min, max] = range;
+    if (max <= min) return min;
+    return Math.round(min + Math.random() * (max - min));
+  }
+
   async generate(params: GenerateParams, opts: { timeoutMs: number; signal?: AbortSignal }): Promise<ProviderResult> {
     if (opts.signal?.aborted) {
       throw new ProviderError("provider_timeout", "Generation aborted before provider call.");
     }
-    if (this.opts.latencyMs > opts.timeoutMs) {
+    const latencyMs = this.pickLatencyMs();
+    if (latencyMs > opts.timeoutMs) {
       await sleep(opts.timeoutMs, opts.signal);
       throw new ProviderError("provider_timeout", `Mock provider exceeded timeout of ${opts.timeoutMs}ms.`);
     }
-    await sleep(this.opts.latencyMs, opts.signal);
+    await sleep(latencyMs, opts.signal);
     if (opts.signal?.aborted) {
       throw new ProviderError("provider_timeout", "Generation aborted during provider call.");
     }
