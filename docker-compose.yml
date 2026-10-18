@@ -34,13 +34,23 @@ services:
       timeout: 3s
       retries: 10
 
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "mc alias set local http://minio:9000 minioadmin minioadmin &&
+             mc mb -p local/soundverse-audio &&
+             echo bucket-ready"
+
   api:
     build: .
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: development
       PORT: 3000
@@ -58,15 +68,16 @@ services:
       APP_BASE_URL: http://localhost:3000
     ports:
       - "3000:3000"
-    command: sh -c "npm run db:migrate && node dist/server.js"
+    # Compiled output only: the runtime image omits devDependencies (tsx).
+    command: sh -c "node dist/db/migrate.js && node dist/server.js"
 
   worker:
     build: .
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: development
       DATABASE_URL: postgres://soundverse:soundverse@postgres:5432/soundverse
