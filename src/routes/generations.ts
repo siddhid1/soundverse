@@ -46,7 +46,6 @@ async function withAudioUrl(row: GenerationRow): Promise<Record<string, unknown>
 
 async function applyRateHeaders(
   reply: FastifyReply,
-  accountId: string,
   planId: string,
   rate: RateCounts,
 ): Promise<void> {
@@ -73,14 +72,18 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
           .code(400)
           .send(buildError("validation_error", "validation_failed", "Invalid generation payload.", requestId));
       }
-      const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
+      const rawHeader = req.headers["idempotency-key"];
+      // Duplicate headers arrive as an array; any multi-value key is
+      // ambiguous and therefore invalid rather than silently first-wins.
+      const idempotencyKey =
+        Array.isArray(rawHeader) ? (rawHeader.length === 1 ? rawHeader[0] : "") : rawHeader;
       try {
         const result = await createGeneration(getPool(), {
           auth: req.apiAuth!,
           idempotencyKey,
           input: parsed.data,
         });
-        await applyRateHeaders(reply, req.apiAuth!.accountId, req.apiAuth!.planId, result.rate);
+        await applyRateHeaders(reply, req.apiAuth!.planId, result.rate);
         if (result.replayed) {
           void reply.header("Idempotent-Replayed", "true");
           return reply.code(200).send({ ...(await withAudioUrl(result.job)), idempotent_replayed: true });
@@ -90,7 +93,7 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
         // Rate headers on rejections too, so clients can back off correctly.
         try {
           const rate = await readRateCounters(getPool(), req.apiAuth!.accountId);
-          await applyRateHeaders(reply, req.apiAuth!.accountId, req.apiAuth!.planId, rate);
+          await applyRateHeaders(reply, req.apiAuth!.planId, rate);
         } catch {
           // Headers are best-effort; the error body is what matters.
         }
@@ -114,7 +117,7 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
       offset: parsed.data.offset,
     });
     const rate = await readRateCounters(getPool(), req.apiAuth!.accountId);
-    await applyRateHeaders(reply, req.apiAuth!.accountId, req.apiAuth!.planId, rate);
+    await applyRateHeaders(reply, req.apiAuth!.planId, rate);
     return reply.send({
       data: await Promise.all(result.data.map(withAudioUrl)),
       pagination: { limit: parsed.data.limit, offset: parsed.data.offset, total: result.total },
@@ -125,7 +128,7 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
     try {
       const job = await getGenerationById(getPool(), req.apiAuth!.accountId, (req.params as { id: string }).id);
       const rate = await readRateCounters(getPool(), req.apiAuth!.accountId);
-      await applyRateHeaders(reply, req.apiAuth!.accountId, req.apiAuth!.planId, rate);
+      await applyRateHeaders(reply, req.apiAuth!.planId, rate);
       return reply.send(await withAudioUrl(job));
     } catch (err) {
       sendServiceError(reply, err);
@@ -154,7 +157,7 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
       planId: req.apiAuth!.planId,
     });
     const rate = await readRateCounters(getPool(), req.apiAuth!.accountId);
-    await applyRateHeaders(reply, req.apiAuth!.accountId, req.apiAuth!.planId, rate);
+    await applyRateHeaders(reply, req.apiAuth!.planId, rate);
     return reply.send(summary);
   });
 }

@@ -13,7 +13,12 @@ const envSchema = z.object({
   S3_BUCKET: z.string().default("soundverse-audio"),
   S3_ACCESS_KEY: z.string().default("minioadmin"),
   S3_SECRET_KEY: z.string().default("minioadmin"),
-  S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  // NOTE: z.coerce.boolean() maps the string "false" to true; parse explicitly.
+  S3_FORCE_PATH_STYLE: z
+    .string()
+    .default("true")
+    .transform((v) => v === "true" || v === "1")
+    .pipe(z.boolean()),
   AUDIO_URL_TTL_SEC: z.coerce.number().int().positive().default(900),
 
   // Auth / sessions

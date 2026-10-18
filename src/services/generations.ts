@@ -68,15 +68,7 @@ export const JOB_COLS = `id, account_id, key_id, status, prompt, duration_sec, l
   output_duration_sec, output_format, error_code, error_message, attempts,
   cancel_requested_at, created_at, updated_at, completed_at, period_start`;
 
-export async function getPlan(q: Queryable, planId: string): Promise<PlanLimits> {
-  const res = await q.query(
-    `SELECT id, monthly_allowance_credits, parallel_generations, requests_per_hour,
-            requests_per_day, allowed_licenses, overage_policy
-     FROM plans WHERE id=$1`,
-    [planId],
-  );
-  if ((res.rowCount ?? 0) === 0) throw fail("internal", "Account plan is misconfigured.");
-  const r = res.rows[0] as Record<string, unknown>;
+function mapPlanRow(r: Record<string, unknown>): PlanLimits {
   return {
     id: r.id as string,
     monthlyAllowanceCredits: Number(r.monthly_allowance_credits),
@@ -86,6 +78,17 @@ export async function getPlan(q: Queryable, planId: string): Promise<PlanLimits>
     allowedLicenses: (r.allowed_licenses ?? []) as string[],
     overagePolicy: r.overage_policy as PlanLimits["overagePolicy"],
   };
+}
+
+export async function getPlan(q: Queryable, planId: string): Promise<PlanLimits> {
+  const res = await q.query(
+    `SELECT id, monthly_allowance_credits, parallel_generations, requests_per_hour,
+            requests_per_day, allowed_licenses, overage_policy
+     FROM plans WHERE id=$1`,
+    [planId],
+  );
+  if ((res.rowCount ?? 0) === 0) throw fail("internal", "Account plan is misconfigured.");
+  return mapPlanRow(res.rows[0] as Record<string, unknown>);
 }
 
 export interface RateCounts {
@@ -212,17 +215,11 @@ export async function createGeneration(
   }
 
   // Attempt counting happens outside the money transaction and is never
-  // rolled back (see bumpRateCounters).
-  const rate = await bumpRateCounters(pool, auth.accountId);
-  const plan = await getPlan(pool, auth.planId);
-  if (rate.hour > plan.requestsPerHour) {
-    throw fail("hourly_rate_limit", `Hourly request limit (${plan.requestsPerHour}) exceeded.`, rate.hourResetSec);
-  }
-  if (rate.day > plan.requestsPerDay) {
-    throw fail("daily_rate_limit", `Daily request limit (${plan.requestsPerDay}) exceeded.`, rate.dayResetSec);
-  }
+  // rolled back (see bumpRateCounters). Limit *evaluation* happens below,
+  // inside the lock, against a freshly read plan.
+  await bumpRateCounters(pool, auth.accountId);
 
-    const client = await pool.connect();
+  const client = await pool.connect();
     try {
       await client.query("BEGIN");
       try {
@@ -245,16 +242,32 @@ export async function createGeneration(
         }
         if (!innerHit.generation_id) throw fail("internal", "Idempotency record is incomplete.");
         const job = await getGenerationById(client, auth.accountId, innerHit.generation_id);
+        const rate = await readRateCounters(client, auth.accountId);
         await client.query("COMMIT");
         return { job, replayed: true, rate };
       }
 
-      // The one lock that makes all limits race-safe.
+      // The one lock that makes all limits race-safe. The plan is re-read
+      // here (not from the pre-lock snapshot) so a mid-flight plan change
+      // applies to this request, not the next one.
       const locked = await client.query(
-        `SELECT a.id FROM accounts a WHERE a.id=$1 FOR UPDATE`,
+        `SELECT p.id AS id, p.monthly_allowance_credits, p.parallel_generations,
+                p.requests_per_hour, p.requests_per_day, p.allowed_licenses, p.overage_policy
+         FROM accounts a JOIN plans p ON p.id = a.plan_id
+         WHERE a.id=$1 FOR UPDATE`,
         [auth.accountId],
       );
       if ((locked.rowCount ?? 0) === 0) throw fail("internal", "Account no longer exists.");
+      const plan = mapPlanRow(locked.rows[0] as Record<string, unknown>);
+
+      // Rate counts include this request's bump (never rolled back).
+      const rate = await readRateCounters(client, auth.accountId);
+      if (rate.hour > plan.requestsPerHour) {
+        throw fail("hourly_rate_limit", `Hourly request limit (${plan.requestsPerHour}) exceeded.`, rate.hourResetSec);
+      }
+      if (rate.day > plan.requestsPerDay) {
+        throw fail("daily_rate_limit", `Daily request limit (${plan.requestsPerDay}) exceeded.`, rate.dayResetSec);
+      }
 
       if (!plan.allowedLicenses.includes(input.license)) {
         throw fail(
