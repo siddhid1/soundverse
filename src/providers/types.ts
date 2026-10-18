@@ -34,7 +34,16 @@ export class ProviderError extends Error {
   }
 }
 
+export interface ProviderCallOptions {
+  timeoutMs: number;
+  signal?: AbortSignal;
+  /** Optional in-flight progress callback (percent 0-100). Adapters that can
+   *  observe render progress SHOULD call it; others may ignore it. The worker
+   *  persists progress and emits webhook events — adapters never touch the DB. */
+  onProgress?: (percent: number) => void;
+}
+
 export interface MusicProvider {
   readonly name: string;
-  generate(params: GenerateParams, opts: { timeoutMs: number; signal?: AbortSignal }): Promise<ProviderResult>;
+  generate(params: GenerateParams, opts: ProviderCallOptions): Promise<ProviderResult>;
 }

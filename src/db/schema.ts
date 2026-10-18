@@ -118,6 +118,7 @@ export const generations = pgTable("generations", {
   metadata: jsonb("metadata"),
   reservedCredits: integer("reserved_credits").notNull(),
   chargedCredits: integer("charged_credits"),
+  progress: integer("progress").notNull().default(0),
   provider: text("provider"),
   model: text("model"),
   providerJobId: text("provider_job_id"),

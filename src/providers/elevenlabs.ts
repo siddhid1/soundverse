@@ -1,4 +1,4 @@
-import { ProviderError, type GenerateParams, type MusicProvider, type ProviderResult } from "./types.js";
+import { ProviderError, type GenerateParams, type MusicProvider, type ProviderCallOptions, type ProviderResult } from "./types.js";
 
 export interface ElevenLabsOptions {
   apiKey: string;
@@ -28,7 +28,7 @@ export class ElevenLabsMusicProvider implements MusicProvider {
 
   async generate(
     params: GenerateParams,
-    opts: { timeoutMs: number; signal?: AbortSignal },
+    opts: ProviderCallOptions,
   ): Promise<ProviderResult> {
     const controller = new AbortController();
     const onAbort = () => controller.abort();

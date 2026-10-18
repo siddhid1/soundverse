@@ -25,9 +25,16 @@ function newEventId(): string {
   return `evt_${randomBytes(12).toString("base64url")}`;
 }
 
+export type OutboxEventType =
+  | "generation.succeeded"
+  | "generation.failed"
+  | "generation.canceled"
+  | "generation.created"
+  | "generation.progress";
+
 async function emitOutbox(
   q: Queryable,
-  event: { accountId: string; type: "generation.succeeded" | "generation.failed" | "generation.canceled"; payload: Record<string, unknown> },
+  event: { accountId: string; type: OutboxEventType; payload: Record<string, unknown> },
 ): Promise<void> {
   await q.query(`INSERT INTO outbox_events(id, account_id, type, payload) VALUES ($1,$2,$3,$4)`, [
     newEventId(),
@@ -35,6 +42,37 @@ async function emitOutbox(
     event.type,
     JSON.stringify(event.payload),
   ]);
+}
+
+/**
+ * Persist an in-flight progress tick and emit its webhook event in ONE short
+ * transaction. Guarded on status='running', so a tick that loses the race with
+ * cancel/finalize is a no-op (never resurrects a settled job). These events are
+ * deliberately exempt from the "exactly one terminal event" invariant — that
+ * rule covers succeeded/failed/canceled only.
+ */
+export async function reportProgress(pool: Pool, jobId: string, progress: number): Promise<void> {
+  const pct = Math.max(0, Math.min(100, Math.round(progress)));
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    try {
+      const upd = await client.query(
+        `UPDATE generations SET progress=$2, updated_at=now() WHERE id=$1 AND status='running' RETURNING ${JOB_COLS}`,
+        [jobId, pct],
+      );
+      if ((upd.rowCount ?? 0) > 0) {
+        const live = upd.rows[0] as GenerationRow;
+        await emitOutbox(client, { accountId: live.account_id, type: "generation.progress", payload: eventPayload(live) });
+      }
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
 }
 
 function contentTypeFor(format: string): string {
@@ -48,6 +86,7 @@ function eventPayload(job: GenerationRow, extra: Record<string, unknown> = {}): 
     generation_id: job.id,
     account_id: job.account_id,
     status: job.status,
+    progress: job.progress,
     license: job.license,
     credits_charged: job.charged_credits,
     provider: job.provider,
@@ -71,7 +110,7 @@ export async function claimNextJob(q: Queryable, leaseSec: number): Promise<Gene
        ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
      )
      UPDATE generations g
-     SET status='running', attempts=g.attempts+1, claimed_at=now(),
+     SET status='running', attempts=g.attempts+1, claimed_at=now(), progress=10,
          lease_expires_at=now() + make_interval(secs => $1), updated_at=now()
      FROM next WHERE g.id=next.nid AND g.status='queued'
      RETURNING ${JOB_COLS}`,
@@ -121,7 +160,7 @@ export async function recoverExpiredJobs(pool: Pool = getPool(), eng: EngineOpti
           await transitionToFailed(client, raw, "worker_recovery", "Job exceeded retry budget after worker loss.");
         } else {
           await client.query(
-            `UPDATE generations SET status='queued', claimed_at=NULL, lease_expires_at=NULL, updated_at=now()
+            `UPDATE generations SET status='queued', claimed_at=NULL, lease_expires_at=NULL, progress=0, updated_at=now()
              WHERE id=$1`,
             [raw.id],
           );
@@ -213,7 +252,13 @@ export async function processOnce(pool: Pool = getPool(), eng: EngineOptions): P
         instrumental: job.instrumental,
         providerRequestId: job.id,
       },
-      { timeoutMs: eng.providerTimeoutMs },
+      {
+        timeoutMs: eng.providerTimeoutMs,
+        onProgress: (pct) => {
+          // Fire-and-forget: a lost tick is cosmetic, never correctness.
+          void reportProgress(pool, job.id, pct).catch(() => {});
+        },
+      },
     );
   } catch (err) {
     failure = err instanceof ProviderError ? err : new ProviderError("provider_error", (err as Error).message);
@@ -296,7 +341,7 @@ async function finalizeSuccess(
         }
       }
       const upd = await client.query(
-        `UPDATE generations SET status='succeeded', charged_credits=$2, provider=$3, model=$4,
+        `UPDATE generations SET status='succeeded', progress=100, charged_credits=$2, provider=$3, model=$4,
            provider_job_id=$5, object_key=$6, output_duration_sec=$7, output_format=$8,
            completed_at=now(), lease_expires_at=NULL, updated_at=now()
          WHERE id=$1 AND status='running' RETURNING ${JOB_COLS}`,
@@ -337,7 +382,7 @@ async function finalizeFailure(pool: Pool, eng: EngineOptions, job: GenerationRo
       }
       if (live.attempts < eng.maxAttempts) {
         await client.query(
-          `UPDATE generations SET status='queued', claimed_at=NULL, lease_expires_at=NULL,
+          `UPDATE generations SET status='queued', claimed_at=NULL, lease_expires_at=NULL, progress=0,
              error_code=$2, error_message=$3, updated_at=now() WHERE id=$1`,
           [live.id, err.code, err.message.slice(0, 500)],
         );

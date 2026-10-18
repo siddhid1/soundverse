@@ -129,7 +129,10 @@ describe("worker happy path", () => {
     );
     expect(Object.fromEntries(sums.rows.map((r) => [r.type, r.n]))).toEqual({ charge: 1, reservation: 1 });
 
-    const events = await db.pool.query(`SELECT type FROM outbox_events WHERE account_id=$1`, [accountId]);
+    const events = await db.pool.query(
+      `SELECT type FROM outbox_events WHERE account_id=$1 AND type IN ('generation.succeeded','generation.failed','generation.canceled')`,
+      [accountId],
+    );
     expect(events.rows).toEqual([{ type: "generation.succeeded" }]);
 
     const got = await app.inject({ method: "GET", url: `/v1/generations/${jobId}`, headers: { authorization: `Bearer ${secret}` } });
@@ -180,7 +183,10 @@ describe("failures, retries, recovery", () => {
       [accountId],
     );
     expect(Object.fromEntries(sums.rows.map((r) => [r.type, r.n]))).toEqual({ release: 1, reservation: 1 });
-    const events = await db.pool.query(`SELECT type FROM outbox_events WHERE account_id=$1`, [accountId]);
+    const events = await db.pool.query(
+      `SELECT type FROM outbox_events WHERE account_id=$1 AND type IN ('generation.succeeded','generation.failed','generation.canceled')`,
+      [accountId],
+    );
     expect(events.rows).toEqual([{ type: "generation.failed" }]);
   });
 
@@ -254,7 +260,10 @@ describe("failures, retries, recovery", () => {
       [accountId],
     );
     expect(Object.fromEntries(sums.rows.map((r) => [r.type, r.n]))).toEqual({ release: 1, reservation: 1 });
-    const events = await db.pool.query(`SELECT type FROM outbox_events WHERE account_id=$1`, [accountId]);
+    const events = await db.pool.query(
+      `SELECT type FROM outbox_events WHERE account_id=$1 AND type IN ('generation.succeeded','generation.failed','generation.canceled')`,
+      [accountId],
+    );
     expect(events.rows).toEqual([{ type: "generation.canceled" }]);
   });
 

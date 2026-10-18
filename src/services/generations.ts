@@ -46,6 +46,7 @@ export interface GenerationRow {
   metadata: Record<string, unknown> | null;
   reserved_credits: number;
   charged_credits: number | null;
+  progress: number;
   provider: string | null;
   model: string | null;
   provider_job_id: string | null;
@@ -64,7 +65,7 @@ export interface GenerationRow {
 
 /** Column list shared with the worker engine (single source of truth for job reads). */
 export const JOB_COLS = `id, account_id, key_id, status, prompt, duration_sec, license, instrumental, metadata,
-  reserved_credits, charged_credits, provider, model, provider_job_id, object_key,
+  reserved_credits, charged_credits, progress, provider, model, provider_job_id, object_key,
   output_duration_sec, output_format, error_code, error_message, attempts,
   cancel_requested_at, created_at, updated_at, completed_at, period_start`;
 
@@ -567,6 +568,7 @@ export function toPublicJob(row: GenerationRow): Record<string, unknown> {
     metadata: row.metadata ?? null,
     credits_reserved: row.reserved_credits,
     credits_charged: row.charged_credits,
+    progress: row.progress,
     cancel_requested: row.cancel_requested_at !== null,
     output:
       row.status === "succeeded" && row.object_key

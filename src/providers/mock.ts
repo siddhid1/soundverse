@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { ProviderError, type GenerateParams, type MusicProvider, type ProviderResult } from "./types.js";
+import { ProviderError, type GenerateParams, type MusicProvider, type ProviderCallOptions, type ProviderResult } from "./types.js";
 
 export interface MockProviderOptions {
   /** Fixed simulated generation time. Ignored when latencyRangeMs is set.
@@ -25,6 +25,9 @@ export interface MockProviderOptions {
  */
 const FIXTURE_SEC = 8;
 const SAMPLE_RATE = 22050;
+/** Below this simulated render time, emitting 25/50/75% ticks is noise (tests
+ *  pass millisecond latencies); real dev renders are 40-60s. */
+const PROGRESS_MIN_LATENCY_MS = 1000;
 
 export function mockToneFrequencyHz(prompt: string): number {
   const digest = createHash("sha256").update(prompt, "utf8").digest();
@@ -77,7 +80,7 @@ export class MockMusicProvider implements MusicProvider {
     return Math.round(min + Math.random() * (max - min));
   }
 
-  async generate(params: GenerateParams, opts: { timeoutMs: number; signal?: AbortSignal }): Promise<ProviderResult> {
+  async generate(params: GenerateParams, opts: ProviderCallOptions): Promise<ProviderResult> {
     if (opts.signal?.aborted) {
       throw new ProviderError("provider_timeout", "Generation aborted before provider call.");
     }
@@ -86,7 +89,18 @@ export class MockMusicProvider implements MusicProvider {
       await sleep(opts.timeoutMs, opts.signal);
       throw new ProviderError("provider_timeout", `Mock provider exceeded timeout of ${opts.timeoutMs}ms.`);
     }
-    await sleep(latencyMs, opts.signal);
+    // Sleep in quarters, reporting progress after each of the first three, so
+    // a long render produces a visible 25/50/75% sequence (100% = succeeded).
+    // Fast (test-sized) renders skip the callback entirely.
+    if (latencyMs >= PROGRESS_MIN_LATENCY_MS) {
+      const segments = 4;
+      for (let i = 1; i <= segments; i++) {
+        await sleep(latencyMs / segments, opts.signal);
+        if (i < segments) opts.onProgress?.(Math.round((i * 100) / segments));
+      }
+    } else {
+      await sleep(latencyMs, opts.signal);
+    }
     if (opts.signal?.aborted) {
       throw new ProviderError("provider_timeout", "Generation aborted during provider call.");
     }
