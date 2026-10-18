@@ -146,6 +146,19 @@ async function completeJob(secret: string, key: string): Promise<string> {
   return jobId;
 }
 
+/**
+ * The delivery tests below assert exact fan-out/delivery counts for the
+ * TERMINAL event. A completed job now also emits generation.created (acceptance)
+ * and, for slow renders, generation.progress events; those are covered by the
+ * lifecycle suite. Drop the non-terminal rows here so counts stay single-event.
+ */
+async function dropNonTerminalEvents(accountId: string): Promise<void> {
+  await db.pool.query(
+    `DELETE FROM outbox_events WHERE account_id=$1 AND type NOT IN ('generation.succeeded','generation.failed','generation.canceled')`,
+    [accountId],
+  );
+}
+
 beforeAll(async () => {
   resetEnvCache();
   db = await startTestDb();
@@ -251,6 +264,7 @@ describe("delivery", () => {
       const reg = await registerEndpoint(secret, stub.url);
       const endpointSecret = (reg.json() as { signing_secret: string }).signing_secret;
       const jobId = await completeJob(secret, "wh-1");
+      await dropNonTerminalEvents(accountId);
 
       const before = await db.pool.query(
         `SELECT type, SUM(amount)::int AS n FROM usage_ledger WHERE account_id=$1 GROUP BY type`,
@@ -293,6 +307,7 @@ describe("delivery", () => {
     expect(reg.statusCode).toBe(201);
     const jobId = await completeJob(secret, "wh-2");
     void jobId;
+    await dropNonTerminalEvents(accountId);
 
     const first = await dispatchOnce(db.pool, dispatchOpts());
     expect(first).toMatchObject({ eventsFannedOut: 1, attempted: 1, delivered: 0, failed: 1 });
@@ -335,10 +350,11 @@ describe("delivery", () => {
   });
 
   it("gives up after the retry budget and never touches the event again", async () => {
-    const { secret } = await newAccount();
+    const { secret, accountId } = await newAccount();
     const reg = await registerEndpoint(secret, "http://127.0.0.1:9/hook"); // discard port: refused
     expect(reg.statusCode).toBe(201);
     await completeJob(secret, "wh-3");
+    await dropNonTerminalEvents(accountId);
     for (let i = 0; i < 3; i++) {
       await dispatchOnce(db.pool, dispatchOpts({ maxAttempts: 3, retryBaseSec: 0.01 }));
       await db.pool.query(`UPDATE webhook_deliveries SET next_attempt_at = now() WHERE status='pending'`);
@@ -350,7 +366,7 @@ describe("delivery", () => {
   });
 
   it("does not follow redirects; same event id is stable across retries", async () => {
-    const { secret } = await newAccount();
+    const { secret, accountId } = await newAccount();
     const stub = new StubReceiver();
     stub.mode = "redirect";
     await stub.start();
@@ -359,6 +375,7 @@ describe("delivery", () => {
       // Second endpoint on the same receiver proves event-id stability.
       await registerEndpoint(secret, `${stub.url}-second`);
       await completeJob(secret, "wh-4");
+      await dropNonTerminalEvents(accountId);
       const summary = await dispatchOnce(db.pool, dispatchOpts());
       expect(summary).toMatchObject({ eventsFannedOut: 1, attempted: 2, delivered: 0 });
       expect(stub.otherHits).toBe(0);
@@ -377,6 +394,7 @@ describe("delivery", () => {
       await registerEndpoint(secret, stub.url);
       await db.pool.query(`UPDATE webhook_endpoints SET enabled=false WHERE account_id=$1`, [accountId]);
       await completeJob(secret, "wh-5");
+      await dropNonTerminalEvents(accountId);
       const summary = await dispatchOnce(db.pool, dispatchOpts());
       expect(summary).toMatchObject({ eventsFannedOut: 1, attempted: 0 });
       expect(stub.received).toHaveLength(0);

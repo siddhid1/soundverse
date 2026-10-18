@@ -1,9 +1,9 @@
-import { randomBytes } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { getPool } from "../db/index.js";
 import { newId } from "../lib/crypto.js";
 import { ProviderError, type MusicProvider } from "../providers/types.js";
 import { getPlan, JOB_COLS, type GenerationRow, type Queryable } from "../services/generations.js";
+import { emitOutbox, jobEventPayload } from "../services/outbox.js";
 import { audioKey, type ObjectStore } from "../storage/store.js";
 
 export interface EngineOptions {
@@ -20,29 +20,6 @@ export interface EngineOptions {
 export type ProcessOutcome =
   | { claimed: false }
   | { claimed: true; jobId: string; outcome: "succeeded" | "failed" | "requeued" | "canceled" | "lost" };
-
-function newEventId(): string {
-  return `evt_${randomBytes(12).toString("base64url")}`;
-}
-
-export type OutboxEventType =
-  | "generation.succeeded"
-  | "generation.failed"
-  | "generation.canceled"
-  | "generation.created"
-  | "generation.progress";
-
-async function emitOutbox(
-  q: Queryable,
-  event: { accountId: string; type: OutboxEventType; payload: Record<string, unknown> },
-): Promise<void> {
-  await q.query(`INSERT INTO outbox_events(id, account_id, type, payload) VALUES ($1,$2,$3,$4)`, [
-    newEventId(),
-    event.accountId,
-    event.type,
-    JSON.stringify(event.payload),
-  ]);
-}
 
 /**
  * Persist an in-flight progress tick and emit its webhook event in ONE short
@@ -63,7 +40,7 @@ export async function reportProgress(pool: Pool, jobId: string, progress: number
       );
       if ((upd.rowCount ?? 0) > 0) {
         const live = upd.rows[0] as GenerationRow;
-        await emitOutbox(client, { accountId: live.account_id, type: "generation.progress", payload: eventPayload(live) });
+        await emitOutbox(client, { accountId: live.account_id, type: "generation.progress", payload: jobEventPayload(live) });
       }
       await client.query("COMMIT");
     } catch (e) {
@@ -79,22 +56,6 @@ function contentTypeFor(format: string): string {
   if (format === "mp3") return "audio/mpeg";
   if (format === "wav") return "audio/wav";
   return "application/octet-stream";
-}
-
-function eventPayload(job: GenerationRow, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    generation_id: job.id,
-    account_id: job.account_id,
-    status: job.status,
-    progress: job.progress,
-    license: job.license,
-    credits_charged: job.charged_credits,
-    provider: job.provider,
-    model: job.model,
-    output_format: job.output_format,
-    completed_at: job.completed_at,
-    ...extra,
-  };
 }
 
 /**
@@ -199,7 +160,7 @@ async function transitionToCanceled(client: PoolClient, job: GenerationRow): Pro
   if ((upd.rowCount ?? 0) === 0) return; // someone else finalized first; their tx owns the ledger
   await releaseReservation(client, upd.rows[0] as GenerationRow, "cancel");
   const done = upd.rows[0] as GenerationRow;
-  await emitOutbox(client, { accountId: done.account_id, type: "generation.canceled", payload: eventPayload(done) });
+  await emitOutbox(client, { accountId: done.account_id, type: "generation.canceled", payload: jobEventPayload(done) });
 }
 
 async function transitionToFailed(
@@ -220,7 +181,7 @@ async function transitionToFailed(
   await emitOutbox(client, {
     accountId: done.account_id,
     type: "generation.failed",
-    payload: eventPayload(done, { error_code: code, error_message: message.slice(0, 500) }),
+    payload: jobEventPayload(done, { error_code: code, error_message: message.slice(0, 500) }),
   });
 }
 
@@ -352,7 +313,7 @@ async function finalizeSuccess(
         return { claimed: true, jobId: job.id, outcome: "lost" };
       }
       const done = upd.rows[0] as GenerationRow;
-      await emitOutbox(client, { accountId: done.account_id, type: "generation.succeeded", payload: eventPayload(done) });
+      await emitOutbox(client, { accountId: done.account_id, type: "generation.succeeded", payload: jobEventPayload(done) });
       await client.query("COMMIT");
       return { claimed: true, jobId: job.id, outcome: "succeeded" };
     } catch (e) {

@@ -4,6 +4,7 @@ import { getPool } from "../db/index.js";
 import { canonicalHash } from "../lib/canonical.js";
 import type { AuthContext } from "./apiKeys.js";
 import { creditsFor, currentPeriodStart, type GenerationInput, type License } from "./credits.js";
+import { emitOutbox, jobEventPayload } from "./outbox.js";
 import { newId } from "../lib/crypto.js";
 
 export type Queryable = Pool | PoolClient;
@@ -404,6 +405,15 @@ export async function createGeneration(
         await client.query("COMMIT");
         return { job, replayed: true, rate };
       }
+
+      // Lifecycle event: acceptance is atomic with the job row, so a 202 and
+      // its event can never diverge. Replays returned above emit nothing, and
+      // this sits after the savepoint so a lost idem-race rollback drops it too.
+      await emitOutbox(client, {
+        accountId: auth.accountId,
+        type: "generation.created",
+        payload: jobEventPayload(jobRes.rows[0] as GenerationRow),
+      });
 
       // Opportunistic expiry cleanup (24h retention) scoped to this account.
       await client.query(`DELETE FROM idempotency_records WHERE account_id=$1 AND expires_at < now()`, [
