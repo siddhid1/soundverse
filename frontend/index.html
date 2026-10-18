@@ -15,6 +15,7 @@
       <button data-tab="keys">API keys</button>
       <button data-tab="generate">Generate</button>
       <button data-tab="usage">Usage &amp; credits</button>
+      <button data-tab="monitoring">Monitoring</button>
       <button data-tab="webhooks">Webhooks</button>
       <button data-tab="audit">Audit</button>
     </nav>
@@ -176,30 +177,103 @@
       </p>
     </section>
 
+    <section id="tab-monitoring" class="tab hidden">
+      <h2>Monitoring</h2>
+      <p class="muted">Everything at once from <code>GET /v1/monitoring</code> — one bearer key. Read-only aggregation over the ledger, jobs, keys, audit and webhook deliveries.</p>
+      <div class="toolbar">
+        <button type="button" id="btn-mon-reload">Reload</button>
+        <label style="margin:0"><input type="checkbox" id="mon-auto" style="width:auto" /> auto-refresh (10s)</label>
+      </div>
+
+      <div class="card">
+        <h3>Account — <span id="mon-period">—</span></h3>
+        <div class="stats" id="mon-stats"></div>
+        <div class="chips" id="mon-jobs-by-status"></div>
+      </div>
+
+      <div class="card">
+        <h3>Per API key — songs, generation time, credits</h3>
+        <div id="mon-per-key"></div>
+      </div>
+
+      <div class="card">
+        <h3>Recent generations</h3>
+        <div id="mon-recent"></div>
+      </div>
+
+      <div class="card">
+        <h3>Last 30 days</h3>
+        <div class="mini-chart" id="mon-chart"></div>
+        <div id="mon-daily"></div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Webhooks (24h deliveries)</h3>
+          <div id="mon-webhooks"></div>
+        </div>
+        <div class="card">
+          <h3>Recent audit</h3>
+          <div id="mon-audit"></div>
+        </div>
+      </div>
+    </section>
+
     <section id="tab-webhooks" class="tab hidden">
       <h2>Webhooks</h2>
+      <p class="muted">
+        Every enabled endpoint receives <b>all</b> event types for the account. Filtering and dedupe happen in your receiver.
+        One song produces this sequence over 40–60s:
+        <code>generation.created</code> → <code>generation.progress</code> (25/50/75) → <code>generation.succeeded</code>.
+      </p>
       <form id="form-wh">
         <h3>Register endpoint</h3>
         <label>URL <input id="wh-url" required maxlength="2048" placeholder="https://example.com/hook" /></label>
+        <div class="toolbar">
+          <select id="wh-target" style="max-width:320px">
+            <option value="host">local receiver — dispatcher on host → http://127.0.0.1:9499/hook</option>
+            <option value="docker">local receiver — dispatcher in docker → http://host.docker.internal:9499/hook</option>
+          </select>
+          <button type="button" id="btn-wh-fill">fill URL</button>
+          <button type="button" id="btn-wh-copy-url">copy URL</button>
+        </div>
+        <p class="muted">Registering <code>localhost</code> when the dispatcher runs in docker is the #1 cause of silent delivery failures — from inside the container that address is the container itself.</p>
         <button type="submit">Register (secret shown once)</button>
       </form>
       <div id="wh-secret-out" class="out"></div>
+      <div class="card">
+        <h3>Local receiver</h3>
+        <div class="out"># terminal 1 — verify signatures, dedupe, filter
+WEBHOOK_SECRET=&lt;signing secret below&gt; npm run hooks:receiver 9499 -- --events generation.progress,generation.succeeded
+
+# terminal 2 — dispatcher logs each delivery
+npm run start:webhooks
+
+# then generate a song on the Generate tab</div>
+      </div>
       <h3>Endpoints</h3>
       <button type="button" id="btn-wh-reload">Reload</button>
+      <div id="wh-health"></div>
       <table>
         <thead><tr><th>url</th><th>enabled</th><th>created</th><th></th></tr></thead>
         <tbody id="wh-rows"></tbody>
       </table>
-      <p class="muted">Deliveries are HMAC-signed (<code>sv-signature</code> over <code>"&lt;timestamp&gt;.&lt;raw body&gt;"</code>, 300s tolerance, stable <code>sv-event-id</code> for dedupe). Per-delivery retry state lives server-side; query the `webhook_deliveries` table with SQL.</p>
+      <p class="muted">Deliveries are HMAC-signed (<code>sv-signature</code> over <code>"&lt;timestamp&gt;.&lt;raw body&gt;"</code>, 300s tolerance, stable <code>sv-event-id</code> for dedupe). Retries use exponential backoff and dead-letter after the attempt budget — a failed webhook never rolls back the job or its billing.</p>
     </section>
 
     <section id="tab-audit" class="tab hidden">
       <h2>Audit log</h2>
-      <button type="button" id="btn-audit-reload">Reload</button>
-      <table>
-        <thead><tr><th>at</th><th>action</th><th>key</th></tr></thead>
-        <tbody id="audit-rows"></tbody>
-      </table>
+      <div class="toolbar">
+        <button type="button" id="btn-audit-reload">Reload</button>
+        <input id="audit-search" placeholder="filter by action or generation id…" style="max-width:280px;margin:0" />
+      </div>
+      <div class="chips" id="audit-filters">
+        <span class="chip active" data-family="">all</span>
+        <span class="chip" data-family="credit">credits</span>
+        <span class="chip" data-family="key">keys</span>
+        <span class="chip" data-family="user">users</span>
+      </div>
+      <div id="audit-rows-wrap"></div>
     </section>
   </main>
 

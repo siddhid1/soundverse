@@ -74,13 +74,6 @@ const apiKeyFor = () => {
 /** Mirrors LICENSE_BASE_COST in the API (src/services/credits.ts). */
 const LICENSE_COST = { royalty_free: 1, sync: 6, full_ownership: 14 };
 const JOB_ACTIVE = ["queued", "running"];
-const EVENT_TYPES = [
-  "generation.created",
-  "generation.progress",
-  "generation.succeeded",
-  "generation.failed",
-  "generation.canceled",
-];
 
 /** credits = license_cost x ceil(duration_sec / 60) — same formula as the API. */
 const costFor = (license, durationSec) =>
@@ -142,6 +135,16 @@ document.querySelectorAll("#tabs button").forEach((b) =>
     b.classList.add("active");
     document.querySelectorAll("main .tab").forEach((s) => s.classList.add("hidden"));
     $(`tab-${b.dataset.tab}`).classList.remove("hidden");
+    // Lazy-load the data-heavy tabs so the console stays instant.
+    if (!apiKey) return;
+    if (b.dataset.tab === "monitoring") void loadMonitoring().catch(() => {});
+    if (b.dataset.tab === "usage") void loadUsage().catch(() => {});
+    if (b.dataset.tab === "webhooks") {
+      void reloadEndpoints().catch(() => {});
+      void loadWebhookHealth().catch(() => {});
+    }
+    if (b.dataset.tab === "keys") void reloadKeys().catch(() => {});
+    if (b.dataset.tab === "generate") void reloadJobs().catch(() => {});
   }),
 );
 
@@ -580,7 +583,124 @@ $("usage-auto").addEventListener("change", () => {
   }
 });
 
+/* ---------- monitoring ---------- */
+let monTimer = null;
+
+async function loadMonitoring() {
+  apiKeyFor();
+  const { data: m } = await dev("/v1/monitoring");
+
+  $("mon-period").textContent = `period ${m.account.period_start} · plan ${m.account.plan_id}`;
+  const c = m.credits ?? {};
+  $("mon-stats").innerHTML = [
+    statTile("remaining", c.remaining_credits, Number(c.remaining_credits) > 0 ? "big good" : "big bad"),
+    statTile("bonus granted", c.granted_credits),
+    statTile("used", c.used_credits),
+    statTile("pending", c.pending_credits),
+    statTile("active jobs", m.active_jobs),
+    statTile("jobs (all time)", Object.values(m.jobs_by_status ?? {}).reduce((a, b) => a + b, 0)),
+  ].join("");
+
+  $("mon-jobs-by-status").innerHTML = Object.entries(m.jobs_by_status ?? {})
+    .sort()
+    .map(([status, n]) => `<span class="chip">${statusBadge(status)} ${n}</span>`)
+    .join("");
+
+  // Per-key: songs, generation time and credits — the attribution view.
+  const perKey = m.per_key ?? [];
+  $("mon-per-key").innerHTML =
+    perKey.length === 0
+      ? `<p class="muted">No API keys yet.</p>`
+      : `<table><thead><tr><th>key</th><th>mode</th><th>songs</th><th>ok</th><th>failed</th><th>avg time</th><th>max</th><th>credits</th><th>pending</th><th>last used</th></tr></thead><tbody>` +
+        perKey
+          .map(
+            (k) =>
+              `<tr><td><code>${esc(k.prefix)}…</code></td><td>${esc(k.mode)}</td>` +
+              `<td>${esc(k.songs.total)}</td><td>${esc(k.songs.succeeded)}</td><td>${esc(k.songs.failed)}</td>` +
+              `<td>${esc(fmtSecs(k.generation_time.avg_seconds))}</td><td>${esc(fmtSecs(k.generation_time.max_seconds))}</td>` +
+              `<td>${esc(k.credits_used)}</td><td>${esc(k.credits_pending)}</td><td>${esc(fmtWhen(k.last_used_at))}</td></tr>`,
+          )
+          .join("") +
+        `</tbody></table>`;
+
+  const recent = m.recent_generations ?? [];
+  $("mon-recent").innerHTML =
+    recent.length === 0
+      ? `<p class="muted">No generations yet.</p>`
+      : `<table><thead><tr><th>id</th><th>status</th><th>progress</th><th>license</th><th>len</th><th>charged</th><th>took</th><th>created</th></tr></thead><tbody>` +
+        recent
+          .map((g) => {
+            const pct = g.status === "succeeded" ? 100 : Number(g.progress) || 0;
+            return (
+              `<tr><td><code>${esc(g.id)}</code></td><td>${statusBadge(g.status)}</td>` +
+              `<td>${progressBarHtml(pct, g.status)} ${pct}%</td><td>${esc(g.license)}</td><td>${esc(g.duration_sec)}s</td>` +
+              `<td>${esc(g.credits_charged ?? "—")}</td><td>${esc(fmtSecs(g.generation_seconds))}</td><td>${esc(fmtWhen(g.created_at))}</td></tr>`
+            );
+          })
+          .join("") +
+        `</tbody></table>`;
+
+  // 30-day rollup: bar height = songs that day.
+  const daily = m.daily_usage_last_30_days ?? [];
+  const maxSongs = Math.max(1, ...daily.map((d) => d.songs));
+  $("mon-chart").innerHTML = daily.length === 0 ? "" : daily
+    .slice()
+    .reverse()
+    .map(
+      (d) =>
+        `<div class="mini-col" title="${esc(d.day)}: ${d.songs} songs, ${d.used_credits} credits">` +
+        `<div class="mini-bar" style="height:${Math.round((d.songs / maxSongs) * 100)}%"></div></div>`,
+    )
+    .join("");
+  $("mon-daily").innerHTML =
+    daily.length === 0
+      ? `<p class="muted">No usage in the last 30 days.</p>`
+      : `<p class="muted">${daily.length} active day(s) · tallest bar = ${maxSongs} songs · hover for detail.</p>`;
+
+  const wh = m.webhooks ?? { endpoints: [], deliveries_last_24h: {} };
+  const d = wh.deliveries_last_24h ?? {};
+  $("mon-webhooks").innerHTML =
+    `<div class="stats">` +
+    statTile("endpoints", (wh.endpoints ?? []).length) +
+    statTile("delivered 24h", d.delivered ?? 0, "good") +
+    statTile("failed", d.failed ?? 0, d.failed ? "warn" : "") +
+    statTile("dead", d.dead ?? 0, d.dead ? "bad" : "") +
+    statTile("pending", d.pending ?? 0) +
+    `</div>`;
+
+  $("mon-audit").innerHTML = renderAuditTable(m.audit ?? [], 8);
+  return m;
+}
+
+$("btn-mon-reload").addEventListener("click", async () => {
+  try {
+    await loadMonitoring();
+  } catch (err) {
+    toast(String(err.message || err));
+  }
+});
+
+$("mon-auto").addEventListener("change", () => {
+  clearInterval(monTimer);
+  monTimer = null;
+  if ($("mon-auto").checked) monTimer = setInterval(() => void loadMonitoring().catch(() => {}), 10000);
+});
+
 /* ---------- webhooks ---------- */
+const WH_URLS = {
+  host: "http://127.0.0.1:9499/hook",
+  docker: "http://host.docker.internal:9499/hook",
+};
+$("btn-wh-fill").addEventListener("click", () => {
+  $("wh-url").value = WH_URLS[$("wh-target").value] ?? "";
+});
+$("btn-wh-copy-url").addEventListener("click", () => {
+  const url = $("wh-url").value.trim() || WH_URLS[$("wh-target").value];
+  navigator.clipboard
+    .writeText(url)
+    .then(() => toast("URL copied.", true), () => toast("Clipboard blocked — copy manually."));
+});
+
 $("form-wh").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
@@ -591,7 +711,7 @@ $("form-wh").addEventListener("submit", async (e) => {
     });
     $("wh-secret-out").innerHTML =
       `<p><b>Signing secret (shown ONCE):</b></p><p class="secret"><code>${esc(data.signing_secret)}</code></p>` +
-      `<p class="muted">Deliveries carry sv-signature / sv-timestamp / sv-event-id headers.</p>`;
+      `<p class="muted">Pass it to the receiver as WEBHOOK_SECRET. Deliveries carry sv-signature / sv-timestamp / sv-event-id.</p>`;
     toast("Endpoint registered.", true);
     await reloadEndpoints();
   } catch (err) {
@@ -605,7 +725,7 @@ async function reloadEndpoints() {
     const { data } = await dev("/v1/webhook_endpoints");
     $("wh-rows").innerHTML = data.endpoints
       .map(
-        (w) => `<tr><td><code>${esc(w.url)}</code></td><td>${w.enabled}</td><td>${esc(w.created_at)}</td><td><button data-id="${esc(w.id)}">delete</button></td></tr>`,
+        (w) => `<tr><td><code>${esc(w.url)}</code></td><td>${w.enabled}</td><td>${esc(fmtWhen(w.created_at))}</td><td><button data-id="${esc(w.id)}">delete</button></td></tr>`,
       )
       .join("");
   } catch (err) {
@@ -613,7 +733,22 @@ async function reloadEndpoints() {
   }
 }
 
-$("btn-wh-reload").addEventListener("click", reloadEndpoints);
+/** Delivery health piggybacks on /v1/monitoring (Bearer), so it is best-effort. */
+async function loadWebhookHealth() {
+  try {
+    const { data: m } = await dev("/v1/monitoring");
+    const d = m.webhooks?.deliveries_last_24h ?? {};
+    $("wh-health").innerHTML =
+      `<p class="muted">last 24h — delivered <b>${d.delivered ?? 0}</b> · failed <b>${d.failed ?? 0}</b> · dead <b>${d.dead ?? 0}</b> · pending <b>${d.pending ?? 0}</b></p>`;
+  } catch {
+    $("wh-health").innerHTML = "";
+  }
+}
+
+$("btn-wh-reload").addEventListener("click", async () => {
+  await reloadEndpoints();
+  await loadWebhookHealth();
+});
 $("wh-rows").addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-id]");
   if (!btn) return;
@@ -628,15 +763,76 @@ $("wh-rows").addEventListener("click", async (e) => {
 });
 
 /* ---------- audit ---------- */
+let auditEntries = [];
+let auditFamily = "";
+
+const familyOf = (action) =>
+  String(action).startsWith("credit.")
+    ? "credit"
+    : String(action).startsWith("key.")
+      ? "key"
+      : "user";
+
+/** Credit rows read as a ledger; key/user rows show their metadata fields. */
+function auditDetailHtml(a) {
+  const m = a.metadata ?? {};
+  if (familyOf(a.action) === "credit") {
+    const parts = [creditAmountHtml(a.action, m)];
+    if (m.generation_id) parts.push(`<code>${esc(m.generation_id)}</code>`);
+    if (m.reason) parts.push(esc(m.reason));
+    if (m.license) parts.push(`${esc(m.license)} ${esc(m.duration_sec ?? "")}s`.trim());
+    return parts.filter(Boolean).join(" ");
+  }
+  if (m.from_prefix || m.to_prefix) return `${esc(m.from_prefix ?? "?")} → ${esc(m.to_prefix ?? "?")}`;
+  if (m.prefix) return `<code>${esc(m.prefix)}</code>`;
+  if (m.email) return esc(m.email);
+  return "";
+}
+
+function renderAuditTable(entries, limit = 50) {
+  const rows = entries.slice(0, limit);
+  if (rows.length === 0) return `<p class="muted">No audit entries yet.</p>`;
+  return (
+    `<table><thead><tr><th>at</th><th>action</th><th>details</th><th>key</th></tr></thead><tbody>` +
+    rows
+      .map(
+        (a) =>
+          `<tr><td>${esc(fmtWhen(a.created_at))}</td><td>${actionBadge(a.action)}</td>` +
+          `<td>${auditDetailHtml(a)}</td><td>${a.key_id ? `<code>${esc(String(a.key_id).slice(0, 8))}…</code>` : "—"}</td></tr>`,
+      )
+      .join("") +
+    `</tbody></table>`
+  );
+}
+
+function applyAuditFilters() {
+  const q = $("audit-search").value.trim().toLowerCase();
+  const filtered = auditEntries.filter((a) => {
+    if (auditFamily && familyOf(a.action) !== auditFamily) return false;
+    if (!q) return true;
+    const hay = `${a.action} ${a.metadata?.generation_id ?? ""} ${a.key_id ?? ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+  $("audit-rows-wrap").innerHTML = renderAuditTable(filtered);
+}
+
 $("btn-audit-reload").addEventListener("click", async () => {
   try {
-    const res = await fetch("/audit-log", { credentials: "same-origin" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) fail(data, res);
-    $("audit-rows").innerHTML = data.entries
-      .map((a) => `<tr><td>${esc(a.created_at)}</td><td>${esc(a.action)}</td><td>${esc(a.key_id ?? "—")}</td></tr>`)
-      .join("");
+    const res = await sess("/audit-log");
+    auditEntries = res.entries ?? [];
+    applyAuditFilters();
   } catch (err) {
     toast(String(err.message || err));
   }
+});
+
+$("audit-search").addEventListener("input", applyAuditFilters);
+
+$("audit-filters").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  document.querySelectorAll("#audit-filters .chip").forEach((c) => c.classList.remove("active"));
+  chip.classList.add("active");
+  auditFamily = chip.dataset.family ?? "";
+  applyAuditFilters();
 });
