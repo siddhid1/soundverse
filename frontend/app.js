@@ -249,7 +249,11 @@ async function reloadJobs() {
     const status = $("jobs-filter").value;
     if (status) q.set("status", status);
     const { data } = await dev(`/v1/generations?${q}`);
-    $("jobs-rows").innerHTML = data
+    // List endpoint wraps rows: { data: [...], pagination }. Fail loudly in
+    // the toast (not a white screen) if the shape ever changes again.
+    const jobs = data && Array.isArray(data.data) ? data.data : null;
+    if (!jobs) throw new Error("Unexpected jobs response shape (expected { data: [...] }).");
+    $("jobs-rows").innerHTML = jobs
       .map(
         (j) => `<tr data-id="${esc(j.id)}" style="cursor:pointer"><td><code>${esc(j.id)}</code></td><td>${esc(j.status)}</td><td>${esc(j.license)}</td><td>${esc(j.credits_reserved)}</td><td>${esc(j.credits_charged ?? "—")}</td></tr>`,
       )
