@@ -95,6 +95,7 @@
           </select>
         </label>
         <label><input id="gen-instrumental" type="checkbox" checked /> Instrumental</label>
+        <p class="muted" id="gen-cost"></p>
         <label>Idempotency-Key <input id="gen-idem" required /></label>
         <button type="submit">Start generation (202)</button>
         <button type="button" id="btn-gen-idem">New idempotency key</button>
@@ -114,17 +115,28 @@
           </label>
           <button type="button" id="btn-jobs-reload">Reload</button>
           <table>
-            <thead><tr><th>id</th><th>status</th><th>license</th><th>reserved</th><th>charged</th></tr></thead>
+            <thead><tr><th>id</th><th>status</th><th>progress</th><th>license</th><th>held</th><th>charged</th></tr></thead>
             <tbody id="jobs-rows"></tbody>
           </table>
         </div>
         <div>
           <h3>Job detail</h3>
-          <button type="button" id="btn-job-refresh">Refresh status</button>
-          <button type="button" id="btn-job-cancel">Cancel job</button>
-          <button type="button" id="btn-job-poll">Auto-poll until done</button>
+          <div class="toolbar">
+            <button type="button" id="btn-job-refresh">Refresh</button>
+            <button type="button" id="btn-job-cancel">Cancel</button>
+            <button type="button" id="btn-job-poll">Auto-poll</button>
+          </div>
+          <div class="card" id="job-progress-card" hidden>
+            <div class="toolbar">
+              <strong id="job-progress-pct">0%</strong>
+              <span class="muted" id="job-progress-phase">queued</span>
+              <span class="muted" id="job-elapsed">elapsed —</span>
+            </div>
+            <div id="job-progress-bar"></div>
+          </div>
           <div id="job-out" class="out">No job selected. Create one, or click a row.</div>
           <audio id="job-audio" controls class="hidden"></audio>
+          <p class="muted">Renders take 40–60s in dev. Cancel is honored by the worker at finalize, so a running job may take up to a minute to flip to <code>canceled</code>.</p>
         </div>
       </div>
     </section>

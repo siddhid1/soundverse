@@ -8,7 +8,10 @@
 const $ = (id) => document.getElementById(id);
 let apiKey = null; // pasted Bearer secret, page memory only
 let currentJobId = null;
+let currentJob = null; // last rendered job payload
 let pollTimer = null;
+let elapsedTimer = null;
+let autoPoll = true;
 
 function esc(s) {
   return String(s ?? "").replace(/[<>&"]/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -321,9 +324,18 @@ async function reloadJobs() {
     const jobs = data && Array.isArray(data.data) ? data.data : null;
     if (!jobs) throw new Error("Unexpected jobs response shape (expected { data: [...] }).");
     $("jobs-rows").innerHTML = jobs
-      .map(
-        (j) => `<tr data-id="${esc(j.id)}" style="cursor:pointer"><td><code>${esc(j.id)}</code></td><td>${esc(j.status)}</td><td>${esc(j.license)}</td><td>${esc(j.credits_reserved)}</td><td>${esc(j.credits_charged ?? "—")}</td></tr>`,
-      )
+      .map((j) => {
+        const pct = j.status === "succeeded" ? 100 : Number(j.progress) || 0;
+        return (
+          `<tr data-id="${esc(j.id)}" style="cursor:pointer">` +
+          `<td><code>${esc(j.id)}</code></td>` +
+          `<td>${statusBadge(j.status)}</td>` +
+          `<td>${progressBarHtml(pct, j.status)}${pct}%</td>` +
+          `<td>${esc(j.license)}</td>` +
+          `<td>${esc(j.credits_reserved)}</td>` +
+          `<td>${esc(j.credits_charged ?? "—")}</td></tr>`
+        );
+      })
       .join("");
   } catch (err) {
     toast(String(err.message || err));
@@ -336,16 +348,94 @@ $("jobs-rows").addEventListener("click", (e) => {
   const tr = e.target.closest("tr[data-id]");
   if (!tr) return;
   currentJobId = tr.dataset.id;
+  currentJob = null;
+  renderProgressCard();
   refreshJob();
 });
 
+/* ---------- job progress (dev renders take 40-60s) ---------- */
+
+function stopPoll() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+  clearInterval(elapsedTimer);
+  elapsedTimer = null;
+}
+
+function phaseLabel(j) {
+  const pct = Number(j.progress) || 0;
+  switch (j.status) {
+    case "queued":
+      return j.cancel_requested ? "cancel requested" : "queued — waiting for a worker";
+    case "running":
+      return pct >= 75 ? "finishing up" : "rendering audio";
+    case "succeeded":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "canceled":
+      return "canceled";
+    default:
+      return j.status;
+  }
+}
+
+function renderProgressCard() {
+  const card = $("job-progress-card");
+  if (!currentJob) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  const j = currentJob;
+  const pct = j.status === "succeeded" ? 100 : Number(j.progress) || 0;
+  $("job-progress-pct").textContent = `${pct}%`;
+  $("job-progress-phase").textContent = phaseLabel(j);
+  $("job-progress-bar").innerHTML = progressBarHtml(
+    pct,
+    j.status === "succeeded" ? "done" : j.status === "failed" ? "failed" : j.status === "canceled" ? "canceled" : "big",
+  );
+  tickElapsed();
+}
+
+/** Elapsed runs live while queued/running, and freezes at the final duration. */
+function tickElapsed() {
+  if (!currentJob) return;
+  const j = currentJob;
+  const live = JOB_ACTIVE.includes(j.status);
+  const secs = live
+    ? secsBetween(j.created_at, new Date())
+    : secsBetween(j.created_at, j.completed_at ?? j.updated_at);
+  $("job-elapsed").textContent = live ? `elapsed ${fmtSecs(secs)}` : `took ${fmtSecs(secs)}`;
+}
+
+/** Auto-poll while the selected job is in flight; stops itself at terminal. */
+function ensureAutoPoll() {
+  stopPoll();
+  if (!autoPoll || !currentJob || !JOB_ACTIVE.includes(currentJob.status)) return;
+  pollTimer = setInterval(async () => {
+    const status = await refreshJob(true);
+    if (status === null || !JOB_ACTIVE.includes(status)) {
+      stopPoll();
+      await reloadJobs();
+    }
+  }, 3000);
+  elapsedTimer = setInterval(tickElapsed, 1000);
+}
+
 function renderJob(j, replayed = false) {
+  currentJob = j;
   const o = j.output;
+  const took = secsBetween(j.created_at, j.completed_at);
   $("job-out").textContent =
     `id: ${j.id}\nstatus: ${j.status}${replayed ? " (idempotent replay)" : ""}\n` +
-    `license: ${j.license} · reserved: ${j.credits_reserved} · charged: ${j.credits_charged ?? "—"}\n` +
-    `provider: ${j.provider ?? "—"} · model: ${j.model ?? "—"}\n` +
-    (o && o.audio_url ? `audio: ${o.audio_url}\n(expires — download promptly)` : "output: pending");
+    `progress: ${j.status === "succeeded" ? 100 : Number(j.progress) || 0}%\n` +
+    `license: ${j.license} · held: ${j.credits_reserved} · charged: ${j.credits_charged ?? "—"}\n` +
+    `created: ${fmtWhen(j.created_at)}${j.completed_at ? ` · completed: ${fmtWhen(j.completed_at)}` : ""}` +
+    `${took !== null ? ` · took ${fmtSecs(took)}` : ""}\n` +
+    `provider: ${j.provider ?? "—"} · model: ${j.model ?? "—"}` +
+    (j.cancel_requested ? " · cancel requested" : "") +
+    (o && o.audio_url ? `\naudio: ${o.audio_url}\n(expires — download promptly)` : "\noutput: pending");
   const audio = $("job-audio");
   if (o && o.audio_url) {
     audio.src = o.audio_url;
@@ -354,6 +444,8 @@ function renderJob(j, replayed = false) {
     audio.removeAttribute("src");
     audio.classList.add("hidden");
   }
+  renderProgressCard();
+  ensureAutoPoll();
 }
 
 async function refreshJob(silent = false) {
@@ -372,14 +464,23 @@ async function refreshJob(silent = false) {
   }
 }
 
-$("btn-job-refresh").addEventListener("click", () => refreshJob());
+$("btn-job-refresh").addEventListener("click", async () => {
+  const status = await refreshJob();
+  if (status && !JOB_ACTIVE.includes(status)) await reloadJobs();
+});
+
 $("btn-job-cancel").addEventListener("click", async () => {
   if (!currentJobId) return toast("No job selected.");
   try {
     apiKeyFor();
     const { data } = await dev(`/v1/generations/${currentJobId}/cancel`, { method: "POST" });
     renderJob(data);
-    toast(data.status === "canceled" ? "Canceled (held credits released)." : "Cancel requested (worker will honor it).", true);
+    toast(
+      data.status === "canceled"
+        ? "Canceled (held credits released)."
+        : "Cancel requested — the worker honors it at finalize (may take up to a minute).",
+      true,
+    );
     await reloadJobs();
     void refreshUsageQuiet();
   } catch (err) {
@@ -388,16 +489,22 @@ $("btn-job-cancel").addEventListener("click", async () => {
 });
 
 $("btn-job-poll").addEventListener("click", () => {
-  clearInterval(pollTimer);
-  toast("Polling every 2s until terminal state…", true);
-  pollTimer = setInterval(async () => {
-    const status = await refreshJob(true);
-    if (status === null || !["queued", "running"].includes(status)) {
-      clearInterval(pollTimer);
-      await reloadJobs();
-    }
-  }, 2000);
+  autoPoll = !autoPoll;
+  $("btn-job-poll").textContent = autoPoll ? "Auto-poll ON" : "Auto-poll OFF";
+  toast(autoPoll ? "Auto-poll on (every 3s while the job runs)." : "Auto-poll off.", true);
+  if (autoPoll) ensureAutoPoll();
+  else stopPoll();
 });
+$("btn-job-poll").textContent = "Auto-poll ON";
+
+/* ---------- cost preview ---------- */
+function updateCostPreview() {
+  const cost = costFor($("gen-license").value, $("gen-duration").value);
+  const mins = Math.ceil((Number($("gen-duration").value) || 0) / 60);
+  $("gen-cost").textContent = `This job holds ${cost} credit${cost === 1 ? "" : "s"} (${$("gen-license").value} × ${mins} started minute${mins === 1 ? "" : "s"}), taken from the balance at creation and settled when the render finishes.`;
+}
+["gen-license", "gen-duration"].forEach((id) => $(id).addEventListener("input", updateCostPreview));
+updateCostPreview();
 
 /* ---------- usage ---------- */
 let usageAutoTimer = null;
