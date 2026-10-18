@@ -38,14 +38,14 @@ services:
       retries: 10
 
   minio-init:
-    # silo bundles the mc-compatible client as mcli.
-    image: pgsty/silo:latest
+    # pgsty/mc is the maintained mc build (minio/mc is archived upstream).
+    image: pgsty/mc:latest
     depends_on:
       minio:
         condition: service_healthy
     entrypoint: >
-      sh -c "mcli alias set local http://minio:9000 minioadmin minioadmin &&
-             mcli mb -p local/soundverse-audio &&
+      sh -c "mc alias set local http://minio:9000 minioadmin minioadmin &&
+             mc mb -p local/soundverse-audio &&
              echo bucket-ready"
 
   api:
