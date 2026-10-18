@@ -42,6 +42,8 @@ export const codeToStatus: Record<string, number> = {
   invalid_scope: 400,
   invalid_mode: 400,
   invalid_or_expired_token: 400,
+  webhook_url_blocked: 400,
+  webhook_url_invalid: 400,
   // 401
   invalid_key: 401,
   missing_auth: 401,

@@ -7,6 +7,7 @@ import { authRoutes } from "./routes/auth.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { generationRoutes } from "./routes/generations.js";
 import { healthRoutes } from "./routes/health.js";
+import { webhookRoutes } from "./routes/webhooks.js";
 import { keyRoutes } from "./routes/keys.js";
 import { v1PingRoutes } from "./routes/v1ping.js";
 
@@ -62,6 +63,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(dashboardRoutes);
   await app.register(v1PingRoutes);
   await app.register(generationRoutes);
+  await app.register(webhookRoutes);
   // Phase 4: worker claims + provider + storage. Phase 5: webhook endpoints.
 
   // Helper used by future modules to send canonical errors.

@@ -26,11 +26,25 @@ const envSchema = z.object({
   // Encrypts webhook signing secrets at rest (32-byte hex or utf8; documented in .env.example)
   WEBHOOK_CRYPT_KEY: z.string().min(16).default("dev-webhook-crypt-key-change-me!!"),
 
-  // Provider selection: mock by default. Real provider only when explicitly enabled.
+  // Music provider: mock by default. Real provider only when explicitly enabled.
   PROVIDER: z.enum(["mock", "elevenlabs"]).default("mock"),
   ELEVENLABS_API_KEY: z.string().optional().default(""),
   ELEVENLABS_BASE_URL: z.string().default("https://api.elevenlabs.io"),
   ELEVENLABS_MUSIC_MODEL: z.string().default("music-v1"),
+
+  // Webhook dispatcher tuning
+  WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().positive().default(10),
+  WEBHOOK_RETRY_BASE_SEC: z.coerce.number().positive().default(5),
+  WEBHOOK_MAX_BYTES: z.coerce.number().int().positive().default(1_048_576),
+  // Test/dev escape hatch for local stub receivers. NEVER enable in
+  // production: it permits http + private/loopback destinations. The cloud
+  // metadata range stays blocked regardless of this flag.
+  WEBHOOK_ALLOW_PRIVATE_IPS: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true" || v === "1")
+    .pipe(z.boolean()),
 
   // Worker tuning
   WORKER_POLL_MS: z.coerce.number().int().positive().default(500),
