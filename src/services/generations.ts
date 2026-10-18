@@ -105,6 +105,11 @@ export interface RateCounts {
  * invalid requests cannot dodge the limiter.
  */
 export async function bumpRateCounters(q: Queryable, accountId: string): Promise<RateCounts> {
+  // Fixed windows accumulate one row per account per hour/day; prune anything
+  // older than 48h on every bump so the table cannot grow without bound.
+  await q.query(`DELETE FROM rate_counters WHERE account_id=$1 AND window_start < now() - interval '48 hours'`, [
+    accountId,
+  ]);
   const res = await q.query(
     `INSERT INTO rate_counters(account_id, granularity, window_start, count)
      VALUES ($1,'hour',date_trunc('hour', now()),1), ($1,'day',date_trunc('day', now()),1)

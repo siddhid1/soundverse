@@ -10,7 +10,6 @@
     "start": "node dist/server.js",
     "start:worker": "node dist/worker.js",
     "start:webhooks": "node dist/webhooks.js",
-    "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "test": "vitest run",
     "test:watch": "vitest",
