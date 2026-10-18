@@ -73,7 +73,9 @@ requests; in-flight jobs finalize under the *current* plan with any excess
 recorded as overage (a job that ran while overage was allowed isn't rewritten
 as free). If prior usage already exceeds the new allowance, new live jobs get
 429 `allowance_exceeded`; queued jobs are untouched, nothing is retro-cancelled.
-Sandbox = test keys only (live keys get 403 `live_not_allowed`).
+Sandbox = test keys only (live keys get 403 `live_not_allowed`). New accounts
+start on **starter** (not sandbox) so the signup bonus is actually spendable
+with a live key; sandbox remains the test-key playground (see D13).
 
 ## D7. Cancel: queued cancels cleanly, running cancels by request
 
@@ -137,9 +139,38 @@ Unit tests cover pure logic (pricing, IP classification, signature math).
 Everything touching money/access/rights runs against real PostgreSQL 18
 (embedded binary locally, `TEST_DATABASE_URL` in CI): concurrency tests fire
 genuinely overlapping requests and assert final DB + ledger state. Sequential
-"concurrency" tests were rejected during review. The suite is green at 63
+"concurrency" tests were rejected during review. The suite is green at 73
 tests; two full runs back-to-back show zero flakes except one transient
 teardown race (fixed: pool `error` listeners instead of unhandled throws).
+
+## D13. Signup bonus is a ledger grant, not a mutable balance
+
+Every new account (which now starts on **starter**, so a live key can actually
+spend) receives `SIGNUP_BONUS_CREDITS` (default 10,000) as an append-only
+`usage_ledger` row of type `grant`, written in the same transaction that
+creates the account. Spendable pool = plan allowance + Σ grants; the four
+ledger formulas (`used`, `pending`, remaining) were updated in lockstep, and
+the grant is excluded from the per-day/per-key *consumption* charts so it never
+looks like usage. Why a ledger row and not an `accounts.balance` column: the
+same append-only auditability the rest of billing has — every credit's origin
+is provable, and a "grant" can never be silently mutated. Grants are
+period-scoped like allowances (no rollover), and every grant/reserve/charge/
+release is mirrored into `audit_logs` (`credit.*`) with `key_id` + `generation_id`
+so per-key spend is attributable. Tests pin `SIGNUP_BONUS_CREDITS=0` for the
+billing-mechanics suites and re-enable it in the dedicated bonus suite.
+
+## D14. Lifecycle webhooks: exactly-one-terminal, best-effort progress
+
+`generation.created` is emitted in the acceptance transaction (atomic with the
+202 and its reservation), so a committed job can never lack its event.
+`generation.progress` events are written in their own short transaction,
+guarded on `status='running'`, and are deliberately **exempt** from the
+"exactly one terminal event per job" invariant (D5) — a lost progress tick is
+cosmetic, never correctness, and a tick that loses the race with cancel/finalize
+is a no-op. Receivers dedupe on the stable `sv-event-id`; there is no
+per-endpoint event-type filter yet (every enabled endpoint gets every event).
+The mock reports 25/50/75% only for realistic (≥1s) renders, so millisecond
+test doubles stay quiet.
 
 ## Ambiguity log → chosen behavior (acceptance scenarios)
 

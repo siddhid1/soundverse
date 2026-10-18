@@ -301,7 +301,7 @@ paths:
     get:
       operationId: auditLog
       tags: [keys]
-      summary: Key lifecycle audit (never secrets or hashes)
+      summary: Account audit trail (key lifecycle + credit grant/reserve/charge/release; never secrets or hashes)
       responses:
         '200':
           description: Newest first
@@ -318,9 +318,38 @@ paths:
                         id: { type: string }
                         actor_user_id: { type: string, nullable: true }
                         key_id: { type: string, nullable: true }
-                        action: { type: string, example: key.rotated }
+                        action:
+                          type: string
+                          enum:
+                            - key.created
+                            - key.revoked
+                            - key.rotated
+                            - user.signup
+                            - user.verified
+                            - credit.granted
+                            - credit.reserved
+                            - credit.charged
+                            - credit.released
                         created_at: { type: string, format: date-time }
-                        metadata: { type: object, nullable: true }
+                        metadata: { type: object, nullable: true, description: 'Credit events carry amount, generation_id, license, duration_sec or reason' }
+        '401': { $ref: '#/components/responses/SessionExpired' }
+  /keys/stats:
+    get:
+      operationId: keyStats
+      tags: [keys]
+      summary: Per-API-key stats for the current period (songs, generation time, credits)
+      responses:
+        '200':
+          description: One entry per key, including revoked keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period_start: { type: string, format: date }
+                  per_key:
+                    type: array
+                    items: { $ref: '#/components/schemas/KeyStats' }
         '401': { $ref: '#/components/responses/SessionExpired' }
   /dashboard:
     get:
@@ -537,12 +566,32 @@ paths:
                   plan_id: { type: string }
                   period_start: { type: string, format: date }
                   allowance_credits: { type: integer }
+                  granted_credits: { type: integer, description: Signup bonus credits (append-only ledger grant) usable on top of the plan allowance }
                   used_credits: { type: integer }
                   pending_credits: { type: integer }
-                  remaining_credits: { type: integer }
+                  remaining_credits: { type: integer, description: allowance_credits + granted_credits - used_credits - pending_credits }
                   overage_credits: { type: integer }
                   overage_policy: { type: string, enum: [none, hard_stop, overage] }
                   active_jobs: { type: integer }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+
+  /v1/monitoring:
+    get:
+      operationId: monitoring
+      tags: [generations]
+      summary: Consolidated account monitoring — credits, per-key stats, jobs, audit, webhooks
+      description: >
+        Read-only developer overview of the whole account: credit summary, job
+        counts by status, per-API-key stats (songs, generation time, credits),
+        the 20 most recent generations, a 30-day usage rollup, the latest audit
+        entries and webhook delivery health. Requires `generations:read`.
+      responses:
+        '200':
+          description: Monitoring report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringReport' }
         '401': { $ref: '#/components/responses/InvalidKey' }
         '403': { $ref: '#/components/responses/InsufficientScope' }
 
@@ -732,6 +781,7 @@ components:
         metadata: { type: object, nullable: true }
         credits_reserved: { type: integer }
         credits_charged: { type: integer, nullable: true }
+        progress: { type: integer, minimum: 0, maximum: 100, description: 'Render progress: 10 on claim, 25/50/75 during a long render, 100 on success' }
         cancel_requested: { type: boolean }
         output:
           type: object
@@ -755,10 +805,23 @@ components:
         updated_at: { type: string, format: date-time }
     WebhookDelivery:
       type: object
-      description: Signed POST the platform sends per job event (not a path — reference)
+      description: >
+        Signed POST the platform sends per lifecycle event (not a path — reference).
+        Event `type` is one of: generation.created (accepted, status queued),
+        generation.progress (in-flight percent, repeated), generation.succeeded,
+        generation.failed, generation.canceled. Terminal events number exactly one
+        per job; created/progress are best-effort lifecycle updates. Every delivery
+        carries a stable `sv-event-id` for receiver-side dedupe.
       properties:
         id: { type: string, example: evt_abc }
-        type: { type: string, example: generation.succeeded }
+        type:
+          type: string
+          enum:
+            - generation.created
+            - generation.progress
+            - generation.succeeded
+            - generation.failed
+            - generation.canceled
         account_id: { type: string }
         data: { type: object }
         created_at: { type: string, format: date-time }
@@ -768,3 +831,92 @@ components:
           sv-timestamp: '1728645000'
           sv-event-id: evt_abc123
         body: { id: evt_abc123, type: generation.succeeded, account_id: acct_1, data: { generation_id: gen_01J9ZK3, status: succeeded }, created_at: '2026-10-09T08:30:41Z' }
+    KeyStats:
+      type: object
+      description: Per-API-key attribution for the current billing period
+      properties:
+        key_id: { type: string, format: uuid }
+        prefix: { type: string }
+        mode: { type: string, enum: [test, live] }
+        scopes: { type: array, items: { type: string } }
+        name: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        songs:
+          type: object
+          properties:
+            total: { type: integer }
+            succeeded: { type: integer }
+            failed: { type: integer }
+            canceled: { type: integer }
+            running: { type: integer }
+            queued: { type: integer }
+        credits_used: { type: integer, description: charge + overage_charge for this key this period }
+        credits_pending: { type: integer }
+        generation_time:
+          type: object
+          properties:
+            avg_seconds: { type: number, description: Average wall time (created_at to completed_at) of succeeded songs }
+            max_seconds: { type: number }
+            total_seconds: { type: number }
+    MonitoringReport:
+      type: object
+      properties:
+        account:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            plan_id: { type: string }
+            period_start: { type: string, format: date }
+        credits:
+          type: object
+          description: Same shape as GET /v1/usage (includes granted_credits)
+        jobs_by_status:
+          type: object
+          additionalProperties: { type: integer }
+        active_jobs: { type: integer }
+        per_key:
+          type: array
+          items: { $ref: '#/components/schemas/KeyStats' }
+        recent_generations:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              status: { type: string }
+              key_id: { type: string, nullable: true }
+              license: { type: string }
+              duration_sec: { type: integer }
+              progress: { type: integer }
+              credits_reserved: { type: integer }
+              credits_charged: { type: integer, nullable: true }
+              created_at: { type: string, format: date-time }
+              completed_at: { type: string, format: date-time, nullable: true }
+              generation_seconds: { type: number, nullable: true }
+        daily_usage_last_30_days:
+          type: array
+          items:
+            type: object
+            properties:
+              day: { type: string, format: date }
+              used_credits: { type: integer }
+              pending_credits: { type: integer }
+              songs: { type: integer }
+        audit:
+          type: array
+          items: { type: object }
+        webhooks:
+          type: object
+          properties:
+            endpoints:
+              type: array
+              items: { $ref: '#/components/schemas/WebhookEndpoint' }
+            deliveries_last_24h:
+              type: object
+              properties:
+                delivered: { type: integer }
+                failed: { type: integer }
+                dead: { type: integer }
+                pending: { type: integer }

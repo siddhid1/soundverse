@@ -87,24 +87,27 @@ npm test
 Integration tests boot a **real PostgreSQL 18** automatically (embedded binary
 in a temp dir; set `TEST_DATABASE_URL` to use your own, e.g. CI with compose).
 Concurrency tests synchronize real parallel requests (`Promise.all`) and assert
-final database + ledger state, not just response codes. 63 tests, all green.
+final database + ledger state, not just response codes. 73 tests, all green.
 
 ## Status (honest)
 
 | Area | State |
 |---|---|
 | Foundation (config, health/ready, compose, migrate) | ✅ working |
-| Accounts (signup, verify via server-log link, login/logout, sessions) | ✅ working |
+| Accounts (signup → starter, verify via server-log link, login/logout, sessions) | ✅ working |
+| 10,000-credit signup bonus (append-only ledger grant, shown on dashboard) | ✅ working, tested |
 | API keys (secret-once, safe list, revoke, rotation, test/live, scopes) | ✅ working |
-| Audit log (key created/revoked/rotated; dashboard + API) | ✅ working |
+| Audit log (key lifecycle + credit grant/reserve/charge/release) | ✅ working |
 | Generations (create/get/list/cancel), usage, auth-check ping | ✅ working |
-| Limits (allowance+overage, parallel, hourly/daily, licenses) in one locked tx | ✅ working, concurrency-tested |
+| Limits (allowance+grant+overage, parallel, hourly/daily, licenses) in one locked tx | ✅ working, concurrency-tested |
 | Idempotency-Key (required, free replays, 409 on reuse, race-safe) | ✅ working, concurrency-tested |
 | Append-only usage ledger; dashboard per-key/per-day views | ✅ working |
 | Worker (leases, heartbeat, recovery, bounded retries, conditional finalize) | ✅ working, tested |
-| Providers (mock w/ latency+failure controls; ElevenLabs adapter env-gated, $0 spent) | ✅ working |
+| Providers (mock w/ 40-60s random latency + failure controls; ElevenLabs env-gated, $0 spent) | ✅ working |
+| Live progress (progress column + `generation.progress` events during a render) | ✅ working, tested |
 | Storage (tenant-scoped keys, presigned expiring URLs) | ✅ working, e2e-verified |
-| Webhooks (endpoint CRUD, HMAC delivery, outbox, retries, dead-letter, SSRF guards) | ✅ working, tested |
+| Webhooks (created/progress/succeeded/failed/canceled, HMAC, retries, dead-letter, SSRF guards) | ✅ working, tested |
+| Monitoring (`GET /v1/monitoring`, `/keys/stats`: per-key songs, time, credits) | ✅ working, tested |
 | Docs (OpenAPI 3.1 matching behavior, DECISIONS/AI_USAGE/SECURITY) | ✅ this repo |
 
 ### Known limitations (see DECISIONS.md / SECURITY.md for the full lists)

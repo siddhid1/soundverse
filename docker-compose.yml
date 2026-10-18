@@ -80,6 +80,8 @@ services:
       WEBHOOK_ALLOW_PRIVATE_IPS: "true"
       PROVIDER: mock
       APP_BASE_URL: http://localhost:3000
+      # Every new account starts with 10,000 spendable credits.
+      SIGNUP_BONUS_CREDITS: "10000"
     ports:
       - "3000:3000"
     # Compiled output only: the runtime image omits devDependencies (tsx).
