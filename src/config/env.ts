@@ -9,6 +9,12 @@ const envSchema = z.object({
     .default("postgres://soundverse:soundverse@localhost:5432/soundverse"),
   // S3 / MinIO
   S3_ENDPOINT: z.string().default("http://localhost:9000"),
+  // Public base URL minted into presigned download URLs. Defaults to
+  // S3_ENDPOINT; set it separately when the data plane is only reachable
+  // inside docker (e.g. S3_ENDPOINT=http://minio:9000 but browsers need
+  // http://localhost:9000). The URL must be signed against the public host —
+  // a post-sign string rewrite would invalidate the SigV4 signature.
+  S3_PUBLIC_ENDPOINT: z.string().default(""),
   S3_REGION: z.string().default("us-east-1"),
   S3_BUCKET: z.string().default("soundverse-audio"),
   S3_ACCESS_KEY: z.string().default("minioadmin"),

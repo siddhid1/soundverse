@@ -66,6 +66,10 @@ services:
       HOST: 0.0.0.0
       DATABASE_URL: postgres://soundverse:soundverse@postgres:5432/soundverse
       S3_ENDPOINT: http://minio:9000
+      # Browsers/curl hit the host-mapped port; the worker/SDK traffic stays
+      # on the internal service name above. Presigned URLs are minted against
+      # this public host (signing is local; no extra network hop).
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_REGION: us-east-1
       S3_BUCKET: soundverse-audio
       S3_ACCESS_KEY: minioadmin
