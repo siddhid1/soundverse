@@ -98,38 +98,63 @@ export interface RateCounts {
   dayResetSec: number;
 }
 
-/**
- * Fixed-window counters (UTC hour/day). Atomic single-statement upsert, so
- * concurrent requests never lose increments. Committed immediately and never
- * rolled back: every non-replay attempt counts, including rejected ones, so
- * invalid requests cannot dodge the limiter.
- */
-export async function bumpRateCounters(q: Queryable, accountId: string): Promise<RateCounts> {
-  // Fixed windows accumulate one row per account per hour/day; prune anything
-  // older than 48h on every bump so the table cannot grow without bound.
-  await q.query(`DELETE FROM rate_counters WHERE account_id=$1 AND window_start < now() - interval '48 hours'`, [
-    accountId,
-  ]);
-  const res = await q.query(
-    `INSERT INTO rate_counters(account_id, granularity, window_start, count)
-     VALUES ($1,'hour',date_trunc('hour', now()),1), ($1,'day',date_trunc('day', now()),1)
-     ON CONFLICT (account_id, granularity, window_start) DO UPDATE SET count = rate_counters.count + 1
-     RETURNING granularity, count`,
-    [accountId],
-  );
-  let hour = 0;
-  let day = 0;
-  for (const row of res.rows as { granularity: string; count: number }[]) {
-    if (row.granularity === "hour") hour = Number(row.count);
-    else day = Number(row.count);
-  }
+function resetSecs(): { hourResetSec: number; dayResetSec: number } {
   const now = Date.now();
   const nextHour = new Date(now);
   nextHour.setUTCMinutes(0, 0, 0);
   const hourResetSec = Math.max(1, Math.ceil((nextHour.getTime() + 3600_000 - now) / 1000));
   const nextDay = new Date(Date.UTC(nextHour.getUTCFullYear(), nextHour.getUTCMonth(), nextHour.getUTCDate() + 1));
   const dayResetSec = Math.max(1, Math.ceil((nextDay.getTime() - now) / 1000));
-  return { hour, day, hourResetSec, dayResetSec };
+  return { hourResetSec, dayResetSec };
+}
+
+/**
+ * Atomic check-and-increment for the fixed windows. The UPDATE both tests the
+ * cap and consumes one unit while holding the row lock, so N concurrent
+ * requests consume exactly N units and the (limit+1)-th is rejected — no
+ * over-admission and no over-rejection. Runs inside the account-locked
+ * transaction, so rejected attempts roll back without consuming budget or
+ * ledger (a client spamming invalid requests only slows its own account,
+ * which shares one lock anyway — documented residual, not a cross-tenant issue).
+ */
+async function takeRateQuota(client: PoolClient, accountId: string, plan: PlanLimits): Promise<RateCounts> {
+  await client.query(
+    `INSERT INTO rate_counters(account_id, granularity, window_start, count)
+     VALUES ($1,'hour',date_trunc('hour', now()),0), ($1,'day',date_trunc('day', now()),0)
+     ON CONFLICT (account_id, granularity, window_start) DO NOTHING`,
+    [accountId],
+  );
+  // Prune dead windows while we are here.
+  await client.query(`DELETE FROM rate_counters WHERE account_id=$1 AND window_start < now() - interval '48 hours'`, [
+    accountId,
+  ]);
+  const hour = await client.query(
+    `UPDATE rate_counters SET count = count + 1
+     WHERE account_id=$1 AND granularity='hour' AND window_start=date_trunc('hour', now()) AND count < $2
+     RETURNING count`,
+    [accountId, plan.requestsPerHour],
+  );
+  if ((hour.rowCount ?? 0) === 0) {
+    const { hourResetSec } = resetSecs();
+    throw fail("hourly_rate_limit", `Hourly request limit (${plan.requestsPerHour}) exceeded.`, hourResetSec);
+  }
+  const day = await client.query(
+    `UPDATE rate_counters SET count = count + 1
+     WHERE account_id=$1 AND granularity='day' AND window_start=date_trunc('day', now()) AND count < $2
+     RETURNING count`,
+    [accountId, plan.requestsPerDay],
+  );
+  if ((day.rowCount ?? 0) === 0) {
+    const { dayResetSec } = resetSecs();
+    throw fail("daily_rate_limit", `Daily request limit (${plan.requestsPerDay}) exceeded.`, dayResetSec);
+  }
+  const { hourResetSec, dayResetSec } = resetSecs();
+  return {
+    hour: Number((hour.rows[0] as { count: number }).count),
+    day: Number((day.rows[0] as { count: number }).count),
+    hourResetSec,
+    dayResetSec,
+  };
 }
 
 export async function readRateCounters(q: Queryable, accountId: string): Promise<RateCounts> {
@@ -207,8 +232,7 @@ export async function createGeneration(
   }
   const requestHash = canonicalHash(input);
 
-  // Fast-path replay: same key + same body returns the original job without
-  // touching quotas, ledger, or the provider. Free by design.
+  // Replays are free: no quota consumed, no ledger touched.
   const fastHit = await findIdem(pool, auth.accountId, rawKey);
   if (fastHit) {
     if (fastHit.request_hash !== requestHash) {
@@ -218,11 +242,6 @@ export async function createGeneration(
     const rate = await readRateCounters(pool, auth.accountId);
     return { job: await getGenerationById(pool, auth.accountId, fastHit.generation_id), replayed: true, rate };
   }
-
-  // Attempt counting happens outside the money transaction and is never
-  // rolled back (see bumpRateCounters). Limit *evaluation* happens below,
-  // inside the lock, against a freshly read plan.
-  await bumpRateCounters(pool, auth.accountId);
 
   const client = await pool.connect();
     try {
@@ -265,14 +284,8 @@ export async function createGeneration(
       if ((locked.rowCount ?? 0) === 0) throw fail("internal", "Account no longer exists.");
       const plan = mapPlanRow(locked.rows[0] as Record<string, unknown>);
 
-      // Rate counts include this request's bump (never rolled back).
-      const rate = await readRateCounters(client, auth.accountId);
-      if (rate.hour > plan.requestsPerHour) {
-        throw fail("hourly_rate_limit", `Hourly request limit (${plan.requestsPerHour}) exceeded.`, rate.hourResetSec);
-      }
-      if (rate.day > plan.requestsPerDay) {
-        throw fail("daily_rate_limit", `Daily request limit (${plan.requestsPerDay}) exceeded.`, rate.dayResetSec);
-      }
+      // Exact, race-free quota consumption (see takeRateQuota).
+      const rate = await takeRateQuota(client, auth.accountId, plan);
 
       if (!plan.allowedLicenses.includes(input.license)) {
         throw fail(

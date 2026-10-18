@@ -377,43 +377,34 @@ describe("concurrency invariants (real PostgreSQL)", () => {
 
   it("hourly quota is enforced account-wide across keys", async () => {
     const ctx = await newAccount("starter");
-    await db.pool.query(`UPDATE plans SET requests_per_hour=5 WHERE id='starter'`);
+    // Parallel raised so the hourly cap is what trips, not the parallel cap.
+    await db.pool.query(`UPDATE plans SET parallel_generations=20, requests_per_hour=5 WHERE id='starter'`);
     try {
       const k1 = await ctx.keyByMode("live");
       const k2 = await ctx.keyByMode("live");
-      for (let i = 0; i < 3; i++) {
+      // Rejected attempts roll back without consuming quota, so all five of
+      // these must succeed to consume the budget.
+      for (const [key, tag] of [[k1, "a"], [k1, "b"], [k1, "c"], [k2, "d"], [k2, "e"]] as const) {
         const r = await app.inject({
           method: "POST",
           url: "/v1/generations",
-          headers: { authorization: `Bearer ${k1}`, "idempotency-key": `q-a-${i}` },
-          payload: { ...VALID_BODY, duration_sec: 5 + i },
+          headers: { authorization: `Bearer ${key}`, "idempotency-key": `q-${tag}` },
+          payload: { ...VALID_BODY },
         });
         expect(r.statusCode).toBe(202);
       }
-      for (let i = 0; i < 2; i++) {
-        const r = await app.inject({
-          method: "POST",
-          url: "/v1/generations",
-          headers: { authorization: `Bearer ${k2}`, "idempotency-key": `q-b-${i}` },
-          payload: { ...VALID_BODY, duration_sec: 5 + i },
-        });
-        // 5th accepted (3 parallel slots free after... queued jobs accumulate: parallel cap is 3!)
-        // The 4th/5th may hit parallel_limit first; both are 429s — assert quota trips eventually.
-        expect([202, 429]).toContain(r.statusCode);
-      }
-      // Exhaust parallel-independent proof: cancel queued jobs, then the 6th attempt trips hourly quota.
-      await db.pool.query(`UPDATE generations SET status='canceled' WHERE account_id=$1`, [ctx.accountId]);
       const sixth = await app.inject({
         method: "POST",
         url: "/v1/generations",
-        headers: { authorization: `Bearer ${k2}`, "idempotency-key": "q-b-final" },
+        headers: { authorization: `Bearer ${k2}`, "idempotency-key": "q-f" },
         payload: { ...VALID_BODY },
       });
       expect(sixth.statusCode).toBe(429);
       expect(sixth.json().error.code).toBe("hourly_rate_limit");
       expect(sixth.headers["retry-after"]).toBeDefined();
+      expect(sixth.headers["x-ratelimit-remaining-hour"]).toBe("0");
     } finally {
-      await db.pool.query(`UPDATE plans SET requests_per_hour=300 WHERE id='starter'`);
+      await db.pool.query(`UPDATE plans SET parallel_generations=3, requests_per_hour=300 WHERE id='starter'`);
     }
   });
 });
