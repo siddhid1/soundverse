@@ -38,6 +38,19 @@ The static UI talks to the API through a dev-server proxy (`/auth`, `/keys`,
 backend changes. Bearer keys live in page memory only. See `frontend/README.md`
 for the click-through checklist.
 
+Watch webhooks locally (verifies signatures, dedupes by `sv-event-id`, filters
+by event type):
+
+```bash
+npm run hooks:receiver 9499 -- --events generation.succeeded,generation.progress
+```
+
+Set `WEBHOOK_SECRET` to the endpoint's signing secret to enable verification
+(without it the receiver logs but does not verify). `--fail` answers 500 on
+purpose, to demo retries → dead-letter. Register the endpoint as
+`http://host.docker.internal:9499/hook` when the dispatcher runs in docker;
+`http://127.0.0.1:9499/hook` is enough when it runs on the host.
+
 
 ## Architecture
 

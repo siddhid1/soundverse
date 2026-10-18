@@ -11,6 +11,7 @@
     "start:worker": "node dist/worker.js",
     "start:webhooks": "node dist/webhooks.js",
     "db:migrate": "tsx src/db/migrate.ts",
+    "hooks:receiver": "node scripts/hook-receiver.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:acceptance": "node scripts/acceptance.mjs",
