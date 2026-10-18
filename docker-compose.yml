@@ -17,8 +17,11 @@ services:
       timeout: 3s
       retries: 10
 
+  # S3-compatible store. pgsty/silo is a drop-in MinIO fork (same S3 API,
+  # same MINIO_* vars, ports and health path): minio/* images are archived
+  # upstream and no longer pull. Pin a digest for production use.
   minio:
-    image: minio/minio:latest
+    image: pgsty/silo:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -35,13 +38,14 @@ services:
       retries: 10
 
   minio-init:
-    image: minio/mc:latest
+    # silo bundles the mc-compatible client as mcli.
+    image: pgsty/silo:latest
     depends_on:
       minio:
         condition: service_healthy
     entrypoint: >
-      sh -c "mc alias set local http://minio:9000 minioadmin minioadmin &&
-             mc mb -p local/soundverse-audio &&
+      sh -c "mcli alias set local http://minio:9000 minioadmin minioadmin &&
+             mcli mb -p local/soundverse-audio &&
              echo bucket-ready"
 
   api:
