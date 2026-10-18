@@ -34,10 +34,16 @@ npm test                    # vitest suite
 | API keys (create secret-once, list safe metadata, revoke, rotate, test/live, scopes) | ✅ working |
 | Audit log (key created/revoked/rotated) | ✅ working |
 | Auth check (`GET /v1/ping`, Bearer, no cache) | ✅ working |
-| Generations + limits + metering | ⬜ missing (Phase 3) |
-| Worker / provider / storage | ⬜ stub only (Phase 4) |
+| Generations (create 202, get, list w/ pagination+filter, cancel) | ✅ working |
+| Limits (allowance+overage, parallel, hourly/daily, licenses) — enforced in one account-locked tx | ✅ working, concurrency-tested |
+| Idempotency-Key (required, replay free, 409 on reuse, race-safe) | ✅ working, concurrency-tested |
+| Usage ledger (append-only; usage derived from it) | ✅ working |
+| Worker / provider / storage | ⬜ stub only (Phase 4 — jobs stay `queued` until then) |
 | Webhooks | ⬜ stub only (Phase 5) |
 | Docs / dashboard | 🟡 partial: minimal dashboard HTML + OpenAPI skeleton (full in Phase 7) |
+
+Rate limits apply to `POST /v1/generations` only in this sprint (polling/reads
+are unthrottled — see DECISIONS.md when it lands in Phase 7).
 
 Tests: `npm test` boots real PostgreSQL automatically (embedded binary when
 `TEST_DATABASE_URL` is unset; uses it when set, e.g. CI with compose).
