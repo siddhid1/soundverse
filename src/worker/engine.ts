@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import { getPool } from "../db/index.js";
 import { newId } from "../lib/crypto.js";
 import { ProviderError, type MusicProvider } from "../providers/types.js";
+import { appendAudit } from "../services/audit.js";
 import { getPlan, JOB_COLS, type GenerationRow, type Queryable } from "../services/generations.js";
 import { emitOutbox, jobEventPayload } from "../services/outbox.js";
 import { audioKey, type ObjectStore } from "../storage/store.js";
@@ -149,6 +150,12 @@ async function releaseReservation(
      VALUES ($1,$2,$3,$4,'release',$5,$6,$7)`,
     [newId(), job.account_id, job.key_id, job.id, job.reserved_credits, job.period_start, JSON.stringify({ reason })],
   );
+  await appendAudit(client, {
+    accountId: job.account_id,
+    action: "credit.released",
+    keyId: job.key_id,
+    metadata: { amount: job.reserved_credits, generation_id: job.id, reason },
+  });
 }
 
 async function transitionToCanceled(client: PoolClient, job: GenerationRow): Promise<void> {
@@ -316,6 +323,14 @@ async function finalizeSuccess(
         return { claimed: true, jobId: job.id, outcome: "lost" };
       }
       const done = upd.rows[0] as GenerationRow;
+      if (charged > 0) {
+        await appendAudit(client, {
+          accountId: done.account_id,
+          action: "credit.charged",
+          keyId: done.key_id,
+          metadata: { amount: charged, generation_id: done.id, license: done.license, duration_sec: done.duration_sec },
+        });
+      }
       await emitOutbox(client, { accountId: done.account_id, type: "generation.succeeded", payload: jobEventPayload(done) });
       await client.query("COMMIT");
       return { claimed: true, jobId: job.id, outcome: "succeeded" };

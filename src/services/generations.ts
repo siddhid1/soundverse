@@ -4,6 +4,7 @@ import { getPool } from "../db/index.js";
 import { canonicalHash } from "../lib/canonical.js";
 import type { AuthContext } from "./apiKeys.js";
 import { creditsFor, currentPeriodStart, type GenerationInput, type License } from "./credits.js";
+import { appendAudit } from "./audit.js";
 import { emitOutbox, jobEventPayload } from "./outbox.js";
 import { newId } from "../lib/crypto.js";
 
@@ -376,6 +377,18 @@ export async function createGeneration(
             JSON.stringify(overageExpected ? { overage_expected: true } : {}),
           ],
         );
+        // Audit trail: which key spent what, for which song. Append-only.
+        await appendAudit(client, {
+          accountId: auth.accountId,
+          action: "credit.reserved",
+          keyId: auth.key.id,
+          metadata: {
+            amount: reserved,
+            generation_id: jobId,
+            license: input.license,
+            duration_sec: input.duration_sec,
+          },
+        });
       }
 
       // The insert race: another request committed the same key first.
@@ -510,6 +523,12 @@ export async function cancelGeneration(
            VALUES ($1,$2,$3,$4,'release',$5,$6,$7)`,
           [newId(), opts.auth.accountId, opts.auth.key.id, job.id, job.reserved_credits, job.period_start, JSON.stringify({ reason: "cancel" })],
         );
+        await appendAudit(client, {
+          accountId: opts.auth.accountId,
+          action: "credit.released",
+          keyId: opts.auth.key.id,
+          metadata: { amount: job.reserved_credits, generation_id: job.id, reason: "cancel" },
+        });
       }
       await client.query("COMMIT");
       return { job: upd.rows[0] as GenerationRow, wasAlreadyCanceled: false };

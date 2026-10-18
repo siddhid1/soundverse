@@ -85,6 +85,12 @@ export async function signup(
          VALUES ($1,$2,NULL,NULL,'grant',$3,$4,$5)`,
         [newId(), accountId, bonus, currentPeriodStart(), JSON.stringify({ reason: "signup_bonus" })],
       );
+      await appendAudit(client, {
+        actorUserId: userId,
+        accountId,
+        action: "credit.granted",
+        metadata: { amount: bonus, reason: "signup_bonus" },
+      });
     }
     const tokenRes = await client.query(
       `INSERT INTO email_verification_tokens(id, user_id, token_hash, expires_at)

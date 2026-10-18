@@ -1,16 +1,22 @@
-import type { Pool } from "pg";
 import { newId } from "../lib/crypto.js";
+import type { Queryable } from "./generations.js";
 
 export type AuditAction =
   | "key.created"
   | "key.revoked"
   | "key.rotated"
   | "user.signup"
-  | "user.verified";
+  | "user.verified"
+  | "credit.granted"
+  | "credit.reserved"
+  | "credit.charged"
+  | "credit.released";
 
-/** Append-only audit event. Never include secrets, hashes, or tokens. */
+/** Append-only audit event. Never include secrets, hashes, or tokens.
+ *  Accepts a Pool or a transaction Client so credit events can be written
+ *  atomically with the ledger change they describe. */
 export async function appendAudit(
-  pool: Pool,
+  q: Queryable,
   event: {
     actorUserId?: string | null;
     accountId: string;
@@ -19,7 +25,7 @@ export async function appendAudit(
     metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
-  await pool.query(
+  await q.query(
     `INSERT INTO audit_logs(id, actor_user_id, account_id, action, key_id, metadata)
      VALUES ($1,$2,$3,$4,$5,$6)`,
     [
@@ -43,8 +49,8 @@ export interface AuditEntry {
   metadata: Record<string, unknown> | null;
 }
 
-export async function listAudit(pool: Pool, accountId: string, limit = 100): Promise<AuditEntry[]> {
-  const res = await pool.query(
+export async function listAudit(q: Queryable, accountId: string, limit = 100): Promise<AuditEntry[]> {
+  const res = await q.query(
     `SELECT id, actor_user_id, account_id, action, key_id, created_at, metadata
      FROM audit_logs WHERE account_id=$1 ORDER BY created_at DESC LIMIT $2`,
     [accountId, limit],
