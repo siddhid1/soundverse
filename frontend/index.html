@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Soundverse API — Console</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Soundverse API — Console</h1>
+    <p class="muted">Minimal UI over the developer API. Same-origin via dev proxy — no backend changes. Bearer keys live in page memory only, never in storage.</p>
+    <nav id="tabs">
+      <button data-tab="account" class="active">Account</button>
+      <button data-tab="keys">API keys</button>
+      <button data-tab="generate">Generate</button>
+      <button data-tab="usage">Usage &amp; credits</button>
+      <button data-tab="webhooks">Webhooks</button>
+      <button data-tab="audit">Audit</button>
+    </nav>
+  </header>
+
+  <div id="toast" class="hidden"></div>
+
+  <main>
+    <section id="tab-account" class="tab">
+      <h2>Account</h2>
+      <div class="grid">
+        <form id="form-signup">
+          <h3>Sign up</h3>
+          <label>Email <input id="su-email" type="email" required placeholder="you@example.com" /></label>
+          <label>Password (12+ chars) <input id="su-password" type="password" required minlength="12" /></label>
+          <button type="submit">Sign up</button>
+          <p class="muted">Verification link is printed to the API server log. Paste the token below.</p>
+        </form>
+        <form id="form-verify">
+          <h3>Verify email</h3>
+          <label>Token <input id="verify-token" required placeholder="from server log" /></label>
+          <button type="submit">Verify</button>
+          <div id="verify-out" class="out"></div>
+        </form>
+        <form id="form-login">
+          <h3>Log in / out</h3>
+          <label>Email <input id="li-email" type="email" required /></label>
+          <label>Password <input id="li-password" type="password" required /></label>
+          <button type="submit">Log in</button>
+          <button type="button" id="btn-logout">Log out</button>
+          <button type="button" id="btn-me">Who am I?</button>
+          <div id="me-out" class="out"></div>
+        </form>
+      </div>
+    </section>
+
+    <section id="tab-keys" class="tab hidden">
+      <h2>API keys</h2>
+      <p id="keys-summary" class="muted"></p>
+      <form id="form-key">
+        <h3>Create key</h3>
+        <label>Name (optional) <input id="key-name" maxlength="80" placeholder="ci" /></label>
+        <fieldset>
+          <legend>Scopes</legend>
+          <label><input type="checkbox" class="key-scope" value="generations:write" checked /> generations:write</label>
+          <label><input type="checkbox" class="key-scope" value="generations:read" checked /> generations:read</label>
+        </fieldset>
+        <label>Mode
+          <select id="key-mode">
+            <option value="test">test (mock, free)</option>
+            <option value="live">live (billed)</option>
+          </select>
+        </label>
+        <button type="submit">Create</button>
+      </form>
+      <div id="key-secret-out" class="out"></div>
+      <h3>Existing keys</h3>
+      <button type="button" id="btn-keys-reload">Reload</button>
+      <table>
+        <thead><tr><th>prefix</th><th>mode</th><th>scopes</th><th>status</th><th>last used</th><th></th></tr></thead>
+        <tbody id="keys-rows"></tbody>
+      </table>
+    </section>
+
+    <section id="tab-generate" class="tab hidden">
+      <h2>Generate music</h2>
+      <label>API key (page memory only — never stored)
+        <input id="gen-key" type="password" placeholder="paste sv_test_… or sv_live_…" autocomplete="off" />
+      </label>
+      <form id="form-gen">
+        <label>Prompt <input id="gen-prompt" required maxlength="2000" value="uplifting acoustic pop for a travel vlog, warm guitars" /></label>
+        <label>Duration (5–300s) <input id="gen-duration" type="number" min="5" max="300" value="30" required /></label>
+        <label>License
+          <select id="gen-license">
+            <option value="royalty_free">royalty_free (1 cr / 60s)</option>
+            <option value="sync">sync (6 cr / 60s)</option>
+            <option value="full_ownership">full_ownership (14 cr / 60s)</option>
+          </select>
+        </label>
+        <label><input id="gen-instrumental" type="checkbox" checked /> Instrumental</label>
+        <label>Idempotency-Key <input id="gen-idem" required /></label>
+        <button type="submit">Start generation (202)</button>
+        <button type="button" id="btn-gen-idem">New idempotency key</button>
+      </form>
+      <div class="grid">
+        <div>
+          <h3>Jobs</h3>
+          <label>Status filter
+            <select id="jobs-filter">
+              <option value="">all</option>
+              <option value="queued">queued</option>
+              <option value="running">running</option>
+              <option value="succeeded">succeeded</option>
+              <option value="failed">failed</option>
+              <option value="canceled">canceled</option>
+            </select>
+          </label>
+          <button type="button" id="btn-jobs-reload">Reload</button>
+          <table>
+            <thead><tr><th>id</th><th>status</th><th>license</th><th>reserved</th><th>charged</th></tr></thead>
+            <tbody id="jobs-rows"></tbody>
+          </table>
+        </div>
+        <div>
+          <h3>Job detail</h3>
+          <button type="button" id="btn-job-refresh">Refresh status</button>
+          <button type="button" id="btn-job-cancel">Cancel job</button>
+          <button type="button" id="btn-job-poll">Auto-poll until done</button>
+          <div id="job-out" class="out">No job selected. Create one, or click a row.</div>
+          <audio id="job-audio" controls class="hidden"></audio>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-usage" class="tab hidden">
+      <h2>Usage &amp; credits</h2>
+      <p class="muted">Bearer key required (usage is per account, across all keys).</p>
+      <button type="button" id="btn-usage-reload">Reload usage</button>
+      <div id="usage-out" class="out"></div>
+      <h3>Price list</h3>
+      <table>
+        <thead><tr><th>license</th><th>credits / started 60s</th></tr></thead>
+        <tbody>
+          <tr><td>royalty_free</td><td>1</td></tr>
+          <tr><td>sync</td><td>6</td></tr>
+          <tr><td>full_ownership</td><td>14</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Billing period = UTC calendar month, no rollover. <code>credits = license_cost × ceil(duration_sec / 60)</code>. Reservations count as pending until finalized. Per-key and per-day breakdowns live on the server-rendered dashboard (<a href="http://localhost:3000/dashboard" target="_blank" rel="noopener">open /dashboard</a>, same session cookie).</p>
+    </section>
+
+    <section id="tab-webhooks" class="tab hidden">
+      <h2>Webhooks</h2>
+      <form id="form-wh">
+        <h3>Register endpoint</h3>
+        <label>URL <input id="wh-url" required maxlength="2048" placeholder="https://example.com/hook" /></label>
+        <button type="submit">Register (secret shown once)</button>
+      </form>
+      <div id="wh-secret-out" class="out"></div>
+      <h3>Endpoints</h3>
+      <button type="button" id="btn-wh-reload">Reload</button>
+      <table>
+        <thead><tr><th>url</th><th>enabled</th><th>created</th><th></th></tr></thead>
+        <tbody id="wh-rows"></tbody>
+      </table>
+      <p class="muted">Deliveries are HMAC-signed (<code>sv-signature</code> over <code>"&lt;timestamp&gt;.&lt;raw body&gt;"</code>, 300s tolerance, stable <code>sv-event-id</code> for dedupe). Per-delivery retry state lives server-side; query it with SQL (see docs/DEMO.md appendix B).</p>
+    </section>
+
+    <section id="tab-audit" class="tab hidden">
+      <h2>Audit log</h2>
+      <button type="button" id="btn-audit-reload">Reload</button>
+      <table>
+        <thead><tr><th>at</th><th>action</th><th>key</th></tr></thead>
+        <tbody id="audit-rows"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
