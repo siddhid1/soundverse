@@ -41,7 +41,9 @@ npm test                    # vitest suite
 | Worker (claim via SKIP LOCKED, leases + heartbeat + recovery, conditional finalize) | ✅ working, tested |
 | Provider (mock w/ latency + failure controls; ElevenLabs adapter behind flag) | ✅ working (mock tested live; adapter tested vs local stub, $0 spend) |
 | Storage (S3 presigned expiring URLs, tenant-scoped keys, memory store for tests) | ✅ working, tested |
-| Webhooks | ⬜ stub only (Phase 5) |
+| Webhooks (endpoint CRUD, HMAC-signed delivery, outbox + retries + dead-letter, SSRF guards) | ✅ working, tested |
+| Docs (OpenAPI full spec, quickstart, DECISIONS/AI_USAGE/SECURITY) | 🟡 OpenAPI skeleton + this status table (full docs in Phase 7) |
+| Dashboard usage view (per-key/per-day) + audit surfacing | 🟡 audit API exists; dashboard rollup in Phase 7 if time |
 | Docs / dashboard | 🟡 partial: minimal dashboard HTML + OpenAPI skeleton (full in Phase 7) |
 
 Rate limits apply to `POST /v1/generations` only in this sprint (polling/reads
