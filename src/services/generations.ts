@@ -221,13 +221,23 @@ export async function createGeneration(
     throw fail("daily_rate_limit", `Daily request limit (${plan.requestsPerDay}) exceeded.`, rate.dayResetSec);
   }
 
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+    const client = await pool.connect();
     try {
-      // Re-check under no lock first: another request may have committed
-      // between our fast-path read and now.
-      const innerHit = await findIdem(client, auth.accountId, rawKey);
+      await client.query("BEGIN");
+      try {
+        // Serialize concurrent POSTs sharing one Idempotency-Key. All txns
+        // for the same (account, key) queue here; the first inserts, the rest
+        // observe the winner via innerHit below and replay it. Lock scope is
+        // the idempotency key (not the account), so unrelated keys proceed in
+        // parallel. hashtext collisions only cause extra waiting, never
+        // incorrectness. The 23505 catch further down stays as a backstop.
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('idem:' || $1 || ':' || $2))`, [
+          auth.accountId,
+          rawKey,
+        ]);
+        // Re-check under no row lock first: another request may have committed
+        // between our fast-path read and now.
+        const innerHit = await findIdem(client, auth.accountId, rawKey);
       if (innerHit) {
         if (innerHit.request_hash !== requestHash) {
           throw fail("idempotency_key_reuse", "Idempotency-Key was already used with a different payload.");
@@ -332,16 +342,26 @@ export async function createGeneration(
         );
       }
 
+      // The insert race: another request committed the same key first.
+      // Uses a savepoint because a unique violation aborts the whole
+      // transaction in Postgres — without it every later statement in this
+      // tx would fail with "current transaction is aborted".
+      await client.query("SAVEPOINT idem_insert");
       try {
         await client.query(
           `INSERT INTO idempotency_records(id, account_id, idempotency_key, request_hash, generation_id, expires_at)
            VALUES ($1,$2,$3,$4,$5, now() + interval '24 hours')`,
           [newId(), auth.accountId, rawKey, requestHash, jobId],
         );
+        await client.query("RELEASE SAVEPOINT idem_insert");
       } catch (e) {
-        // Lost the insert race: the winner committed first. Re-read the
-        // winner and replay it instead of creating a second job or charge.
+        await client.query("ROLLBACK TO SAVEPOINT idem_insert");
+        // Lost the insert race: the winner committed first. Our uncommitted
+        // job + reservation must be removed so the retry creates neither a
+        // duplicate job nor a duplicate charge — then replay the winner.
         if ((e as { code?: string }).code !== "23505") throw e;
+        await client.query(`DELETE FROM usage_ledger WHERE generation_id=$1`, [jobId]);
+        await client.query(`DELETE FROM generations WHERE id=$1`, [jobId]);
         const winner = await findIdem(client, auth.accountId, rawKey);
         if (!winner?.generation_id) throw fail("internal", "Idempotency record is incomplete.");
         if (winner.request_hash !== requestHash) {
