@@ -60,12 +60,13 @@ export class ElevenLabsMusicProvider implements MusicProvider {
       }
       const audio = Buffer.from(await res.arrayBuffer());
       if (audio.length === 0) throw new ProviderError("provider_error", "ElevenLabs returned empty audio.");
+      const providerJobId = res.headers.get("request-id");
       return {
         audio,
         format: "mp3",
         durationSec: params.durationSec,
         model: this.opts.modelId,
-        providerJobId: res.headers.get("request-id") ?? undefined,
+        ...(providerJobId ? { providerJobId } : {}),
       };
     } catch (err) {
       if (err instanceof ProviderError) throw err;
