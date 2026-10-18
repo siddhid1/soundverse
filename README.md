@@ -22,7 +22,9 @@ npm run db:migrate          # needs DATABASE_URL reachable
 npm run dev                 # api on http://localhost:3000
 node dist/worker.js         # build first (npm run build)
 node dist/webhooks.js
-npm test                    # boots real PostgreSQL automatically (see below)
+npm test                    # full suite (real PostgreSQL booted automatically)
+npm run test:acceptance     # the 14 acceptance scenarios as a checklist
+npm run verify              # build + lint + spec + acceptance + full suite
 ```
 
 ## Architecture
