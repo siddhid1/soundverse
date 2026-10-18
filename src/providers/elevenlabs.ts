@@ -33,7 +33,11 @@ export class ElevenLabsMusicProvider implements MusicProvider {
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     opts.signal?.addEventListener("abort", onAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(new Error("provider timeout")), opts.timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, opts.timeoutMs);
     try {
       const res = await fetch(`${this.opts.baseUrl.replace(/\/$/, "")}/v1/music`, {
         method: "POST",
@@ -70,7 +74,7 @@ export class ElevenLabsMusicProvider implements MusicProvider {
       };
     } catch (err) {
       if (err instanceof ProviderError) throw err;
-      if (err instanceof Error && /abort/i.test(`${err.message} ${err.cause ?? ""}${err.name}`)) {
+      if (timedOut || (err instanceof Error && err.name === "AbortError")) {
         throw new ProviderError("provider_timeout", `ElevenLabs music request timed out after ${opts.timeoutMs}ms.`);
       }
       throw new ProviderError("provider_error", `ElevenLabs music request failed: ${(err as Error).message}`);

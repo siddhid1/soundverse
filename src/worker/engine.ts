@@ -67,13 +67,13 @@ function eventPayload(job: GenerationRow, extra: Record<string, unknown> = {}): 
 export async function claimNextJob(q: Queryable, leaseSec: number): Promise<GenerationRow | null> {
   const res = await q.query(
     `WITH next AS (
-       SELECT id FROM generations WHERE status='queued'
+       SELECT id AS nid FROM generations WHERE status='queued'
        ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
      )
      UPDATE generations g
      SET status='running', attempts=g.attempts+1, claimed_at=now(),
          lease_expires_at=now() + make_interval(secs => $1), updated_at=now()
-     FROM next WHERE g.id=next.id AND g.status='queued'
+     FROM next WHERE g.id=next.nid AND g.status='queued'
      RETURNING ${JOB_COLS}`,
     [leaseSec],
   );
