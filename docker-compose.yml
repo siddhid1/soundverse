@@ -51,6 +51,11 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    # Local-dev convenience: allow http + loopback/private webhook targets so
+    # the quickstart receiver works. NEVER enable in production (https + public
+    # IPs are enforced when this is false).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       NODE_ENV: development
       PORT: 3000
@@ -64,6 +69,7 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       SESSION_SECRET: dev-session-secret-change-me-32chars
       WEBHOOK_CRYPT_KEY: dev-webhook-crypt-key-change-me!!
+      WEBHOOK_ALLOW_PRIVATE_IPS: "true"
       PROVIDER: mock
       APP_BASE_URL: http://localhost:3000
     ports:
@@ -94,6 +100,8 @@ services:
 
   webhook-dispatcher:
     build: .
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,6 +110,7 @@ services:
       DATABASE_URL: postgres://soundverse:soundverse@postgres:5432/soundverse
       SESSION_SECRET: dev-session-secret-change-me-32chars
       WEBHOOK_CRYPT_KEY: dev-webhook-crypt-key-change-me!!
+      WEBHOOK_ALLOW_PRIVATE_IPS: "true"
     command: sh -c "node dist/webhooks.js"
 
 volumes:
