@@ -1,10 +1,15 @@
+import cookie from "@fastify/cookie";
 import Fastify, { type FastifyInstance } from "fastify";
 import { getEnv } from "./config/env.js";
 import { buildError, statusForCode } from "./lib/errors.js";
 import { registerRequestHooks, requestIdFor } from "./lib/request.js";
+import { authRoutes } from "./routes/auth.js";
+import { dashboardRoutes } from "./routes/dashboard.js";
 import { healthRoutes } from "./routes/health.js";
+import { keyRoutes } from "./routes/keys.js";
+import { v1PingRoutes } from "./routes/v1ping.js";
 
-export function buildApp(): FastifyInstance {
+export async function buildApp(): Promise<FastifyInstance> {
   const env = getEnv();
   const app = Fastify({
     logger:
@@ -18,6 +23,7 @@ export function buildApp(): FastifyInstance {
   });
 
   registerRequestHooks(app);
+  await app.register(cookie);
 
   // Uniform error shape for validation failures.
   app.setErrorHandler((rawErr, req, reply) => {
@@ -49,12 +55,13 @@ export function buildApp(): FastifyInstance {
       .send(buildError("not_found_error", "not_found", "Route not found.", requestId));
   });
 
-  void app.register(healthRoutes);
-
-  // Phase 2+ route modules mount here:
-  // await app.register(authRoutes);      // signup / verify / login / logout
-  // await app.register(keyRoutes);       // API key management (dashboard session auth)
-  // await app.register(v1Routes, { prefix: "/v1" }); // Bearer-auth developer API
+  await app.register(healthRoutes);
+  await app.register(authRoutes);
+  await app.register(keyRoutes);
+  await app.register(dashboardRoutes);
+  await app.register(v1PingRoutes);
+  // Phase 3: generations, usage, idempotency, ledger.
+  // Phase 5: webhook endpoints + dispatcher.
 
   // Helper used by future modules to send canonical errors.
   app.decorate("apiError", (reply: unknown, code: string, message: string, requestId: string) => {

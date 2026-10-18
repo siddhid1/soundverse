@@ -3,7 +3,7 @@ import { buildApp } from "../src/app.js";
 
 describe("health", () => {
   it("GET /health returns ok", async () => {
-    const app = buildApp();
+    const app = await buildApp();
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ status: "ok" });
@@ -11,7 +11,7 @@ describe("health", () => {
   });
 
   it("unknown route uses canonical error shape", async () => {
-    const app = buildApp();
+    const app = await buildApp();
     const res = await app.inject({ method: "GET", url: "/nope" });
     expect(res.statusCode).toBe(404);
     const body = res.json() as {

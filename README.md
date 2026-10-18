@@ -30,10 +30,16 @@ npm test                    # vitest suite
 | Area | State |
 |---|---|
 | Foundation (config, health, errors, compose, migrate) | ✅ working |
-| Accounts / API keys | ⬜ missing (Phase 2) |
+| Accounts (signup, verify via server-log link, login/logout, sessions) | ✅ working |
+| API keys (create secret-once, list safe metadata, revoke, rotate, test/live, scopes) | ✅ working |
+| Audit log (key created/revoked/rotated) | ✅ working |
+| Auth check (`GET /v1/ping`, Bearer, no cache) | ✅ working |
 | Generations + limits + metering | ⬜ missing (Phase 3) |
 | Worker / provider / storage | ⬜ stub only (Phase 4) |
 | Webhooks | ⬜ stub only (Phase 5) |
-| Docs / dashboard | ⬜ partial skeleton (Phase 7) |
+| Docs / dashboard | 🟡 partial: minimal dashboard HTML + OpenAPI skeleton (full in Phase 7) |
+
+Tests: `npm test` boots real PostgreSQL automatically (embedded binary when
+`TEST_DATABASE_URL` is unset; uses it when set, e.g. CI with compose).
 
 See `IMPLEMENTATION_BRIEF.md` for the full contract and `openapi/openapi.yaml` for the spec skeleton.

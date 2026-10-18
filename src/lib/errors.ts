@@ -35,8 +35,7 @@ export function buildError(
 }
 
 /** Map internal error codes to HTTP status codes. Documented in OpenAPI. */
-export const codeToStatus: Record<string, number> = {
-  invalid_key: 401,
+export const codeToStatus: Record<string, number> = {  invalid_key: 401,
   missing_auth: 401,
   insufficient_scope: 403,
   license_not_allowed: 403,
@@ -55,4 +54,9 @@ export const codeToStatus: Record<string, number> = {
 
 export function statusForCode(code: string, fallback = 500): number {
   return codeToStatus[code] ?? fallback;
+}
+
+/** Status for a known error code, or undefined when unknown. */
+export function knownStatus(code: string): number | undefined {
+  return codeToStatus[code];
 }
