@@ -1,8 +1,12 @@
+import argon2 from "argon2";
 import type { Pool } from "pg";
 import { getPool } from "../db/index.js";
 import { generateOpaqueToken, newId, sha256Hex } from "../lib/crypto.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import { appendAudit } from "./audit.js";
+
+/** Precomputed verifier so login timing does not reveal whether an email exists. */
+const DUMMY_HASH = await argon2.hash("nonexistent-user-timing-dummy", { type: argon2.argon2id });
 
 export const SESSION_COOKIE = "sv_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -47,11 +51,24 @@ export async function signup(
       err.code = "email_taken";
       throw err;
     }
-    const userRes = await client.query(
-      `INSERT INTO users(id, email, password_hash) VALUES ($1,$2,$3)
-       RETURNING id, email, email_verified_at, created_at`,
-      [userId, email, passwordHash],
-    );
+    let userRes;
+    try {
+      userRes = await client.query(
+        `INSERT INTO users(id, email, password_hash) VALUES ($1,$2,$3)
+         RETURNING id, email, email_verified_at, created_at`,
+        [userId, email, passwordHash],
+      );
+    } catch (e) {
+      // Lost the signup race: the other transaction committed the same email
+      // first. The unique index is the backstop; map it to the same 409.
+      await client.query("ROLLBACK").catch(() => {});
+      if ((e as { code?: string }).code === "23505") {
+        const err = new Error("Email already registered.") as Error & { code: string };
+        err.code = "email_taken";
+        throw err;
+      }
+      throw e;
+    }
     await client.query(`INSERT INTO accounts(id, owner_user_id, plan_id) VALUES ($1,$2,'sandbox')`, [
       accountId,
       userId,
@@ -141,12 +158,15 @@ export async function login(
   const res = await pool.query(`SELECT id, email, password_hash, email_verified_at, created_at FROM users WHERE lower(email)=lower($1)`, [
     email,
   ]);
-  const fail = () => {
+  const fail = async () => {
+    // Burn the same Argon2 cost for unknown emails so response timing does
+    // not reveal whether an address is registered.
+    await verifyPassword(DUMMY_HASH, input.password);
     const err = new Error("Invalid email or password.") as Error & { code: string };
     err.code = "invalid_credentials";
     throw err;
   };
-  if ((res.rowCount ?? 0) === 0) fail();
+  if ((res.rowCount ?? 0) === 0) await fail();
   const row = res.rows[0] as {
     id: string;
     email: string;
@@ -154,7 +174,7 @@ export async function login(
     email_verified_at: string | null;
     created_at: string;
   };
-  if (!(await verifyPassword(row.password_hash, input.password))) fail();
+  if (!(await verifyPassword(row.password_hash, input.password))) await fail();
   if (!row.email_verified_at) {
     const err = new Error("Email address is not verified.") as Error & { code: string };
     err.code = "email_not_verified";
