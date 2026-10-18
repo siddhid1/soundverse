@@ -1,32 +1,673 @@
 openapi: 3.1.0
 info:
   title: Soundverse Enterprise Music API
-  version: 0.1.0
+  version: 0.7.0
   description: >-
-    Self-serve developer API for AI music generation. Phase 1 skeleton —
-    full paths for /v1/generations, /v1/usage and /v1/webhook_endpoints
-    are added in Phase 3/5 and must match actual behavior.
+    Self-serve developer API for AI music generation. Authenticate /v1 calls
+    with `Authorization: Bearer <secret key>`. Dashboard routes use a session
+    cookie. Every error uses one shape; rate-limit state rides on headers.
+    The billing period is the UTC calendar month; unused credits never roll over.
 servers:
   - url: http://localhost:3000
     description: Local Docker Compose
+security:
+  - bearerAuth: []
+tags:
+  - name: auth
+    description: Signup, email verification, sessions
+  - name: keys
+    description: API key management (session cookie required)
+  - name: generations
+    description: Async music generation (Bearer key required)
+  - name: webhooks
+    description: Signed delivery of job events (Bearer key required)
 paths:
   /health:
     get:
       operationId: health
       summary: Liveness probe
+      security: []
       responses:
         '200':
           description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
   /ready:
     get:
       operationId: ready
       summary: Readiness probe (database connectivity)
+      security: []
+      responses:
+        '200': { description: Ready }
+        '503': { description: Not ready (database unreachable) }
+
+  /auth/signup:
+    post:
+      operationId: signup
+      tags: [auth]
+      summary: Create an account (plan sandbox)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                password: { type: string, minLength: 12, maxLength: 200 }
+      responses:
+        '201':
+          description: Created; verification link is logged server-side
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  account: { $ref: '#/components/schemas/Account' }
+                  verification:
+                    type: object
+                    properties:
+                      expires_at: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409':
+          description: Email taken
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+              example:
+                error: { type: conflict_error, code: email_taken, message: Email already registered., request_id: req_abc }
+  /auth/verify:
+    get:
+      operationId: verifyEmail
+      tags: [auth]
+      summary: Consume a verification link (single use, 24h expiry)
+      security: []
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
       responses:
         '200':
-          description: Ready
-        '503':
-          description: Not ready
+          description: Verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified: { type: boolean }
+                  user_id: { type: string, format: uuid }
+        '400':
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Start a session (requires a verified email)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Logged in (HttpOnly session cookie set)
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: sv_session cookie
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: Bad credentials (same response for unknown emails)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '403':
+          description: Email not verified
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Revoke the current session
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logged_out: { type: boolean }
+  /auth/me:
+    get:
+      operationId: me
+      tags: [auth]
+      summary: Current session user and account
+      responses:
+        '200':
+          description: Session context
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  account: { $ref: '#/components/schemas/Account' }
+        '401': { $ref: '#/components/responses/SessionExpired' }
+
+  /keys:
+    post:
+      operationId: createKey
+      tags: [keys]
+      summary: Create an API key (secret shown once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scopes, mode]
+              properties:
+                name: { type: string, maxLength: 80 }
+                scopes:
+                  type: array
+                  minItems: 1
+                  items: { type: string, enum: [generations:write, generations:read] }
+                mode: { type: string, enum: [test, live] }
+      responses:
+        '201':
+          description: Created; `secret` never returned again
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiKey'
+                  - type: object
+                    required: [secret]
+                    properties:
+                      secret: { type: string, example: sv_live_Ab3dX7... }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/SessionExpired' }
+    get:
+      operationId: listKeys
+      tags: [keys]
+      summary: List key metadata (never secrets or hashes)
+      responses:
+        '200':
+          description: Keys, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApiKey' }
+        '401': { $ref: '#/components/responses/SessionExpired' }
+  /keys/{id}:
+    get:
+      operationId: getKey
+      tags: [keys]
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '200':
+          description: Key metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key: { $ref: '#/components/schemas/ApiKey' }
+        '401': { $ref: '#/components/responses/SessionExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /keys/{id}/revoke:
+    post:
+      operationId: revokeKey
+      tags: [keys]
+      summary: Revoke a key (idempotent; takes effect on the next request)
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '200':
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key: { $ref: '#/components/schemas/ApiKey' }
+        '401': { $ref: '#/components/responses/SessionExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /keys/{id}/rotate:
+    post:
+      operationId: rotateKey
+      tags: [keys]
+      summary: Create a replacement (old key stays valid until revoked)
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 80 }
+      responses:
+        '201':
+          description: Replacement created; new secret shown once
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiKey'
+                  - type: object
+                    required: [secret]
+                    properties:
+                      secret: { type: string }
+        '401': { $ref: '#/components/responses/SessionExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Cannot rotate a revoked key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+  /audit-log:
+    get:
+      operationId: auditLog
+      tags: [keys]
+      summary: Key lifecycle audit (never secrets or hashes)
+      responses:
+        '200':
+          description: Newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        actor_user_id: { type: string, nullable: true }
+                        key_id: { type: string, nullable: true }
+                        action: { type: string, example: key.rotated }
+                        created_at: { type: string, format: date-time }
+                        metadata: { type: object, nullable: true }
+        '401': { $ref: '#/components/responses/SessionExpired' }
+  /dashboard:
+    get:
+      operationId: dashboard
+      tags: [auth]
+      summary: Minimal server-rendered dashboard (plan, usage, keys, audit)
+      responses:
+        '200':
+          description: HTML page
+          content:
+            text/html:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/SessionExpired' }
+
+  /v1/ping:
+    get:
+      operationId: ping
+      tags: [generations]
+      summary: Auth check (proves secret, scope and mode without billing)
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  account_id: { type: string }
+                  key_id: { type: string }
+                  key_mode: { type: string, enum: [test, live] }
+                  scopes: { type: array, items: { type: string } }
+                  plan_id: { type: string }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+
+  /v1/generations:
+    post:
+      operationId: createGeneration
+      tags: [generations]
+      summary: Reserve credits and queue a generation (202)
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+          description: Required. Same key + same body replays the original job for free; same key + different body is 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenerationInput' }
+      responses:
+        '202':
+          description: Queued (reservation recorded)
+          headers:
+            X-RateLimit-Limit-Hour: { schema: { type: integer } }
+            X-RateLimit-Remaining-Hour: { schema: { type: integer } }
+            X-RateLimit-Limit-Day: { schema: { type: integer } }
+            X-RateLimit-Remaining-Day: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Generation' }
+        '200':
+          description: Idempotent replay of the original job
+          headers:
+            Idempotent-Replayed:
+              schema: { type: string, example: 'true' }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Generation'
+                  - type: object
+                    properties:
+                      idempotent_replayed: { type: boolean }
+        '400':
+          description: validation_failed or idempotency_key_required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403':
+          description: insufficient_scope, license_not_allowed or live_not_allowed (sandbox + live key)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '409':
+          description: Idempotency-Key reused with a different payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+              example:
+                error: { type: conflict_error, code: idempotency_key_reuse, message: Idempotency-Key was already used with a different payload., request_id: req_abc }
+        '429':
+          description: parallel_limit_reached, hourly_rate_limit, daily_rate_limit or allowance_exceeded
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Present on hourly/daily rejections
+            X-RateLimit-Limit-Hour: { schema: { type: integer } }
+            X-RateLimit-Remaining-Hour: { schema: { type: integer } }
+            X-RateLimit-Limit-Day: { schema: { type: integer } }
+            X-RateLimit-Remaining-Day: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+    get:
+      operationId: listGenerations
+      tags: [generations]
+      summary: List jobs, newest first
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [queued, running, succeeded, failed, canceled] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Page of jobs (signed audio URLs included for succeeded jobs)
+          headers:
+            X-RateLimit-Limit-Hour: { schema: { type: integer } }
+            X-RateLimit-Remaining-Hour: { schema: { type: integer } }
+            X-RateLimit-Limit-Day: { schema: { type: integer } }
+            X-RateLimit-Remaining-Day: { schema: { type: integer } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Generation' }
+                  pagination:
+                    type: object
+                    properties:
+                      limit: { type: integer }
+                      offset: { type: integer }
+                      total: { type: integer }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+  /v1/generations/{id}:
+    get:
+      operationId: getGeneration
+      tags: [generations]
+      parameters:
+        - $ref: '#/components/parameters/GenerationId'
+      responses:
+        '200':
+          description: Job status and, when finished, the signed audio URL
+          headers:
+            X-RateLimit-Limit-Hour: { schema: { type: integer } }
+            X-RateLimit-Remaining-Hour: { schema: { type: integer } }
+            X-RateLimit-Limit-Day: { schema: { type: integer } }
+            X-RateLimit-Remaining-Day: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Generation' }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404':
+          description: Unknown id or another account's job (indistinguishable by design)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+  /v1/generations/{id}/cancel:
+    post:
+      operationId: cancelGeneration
+      tags: [generations]
+      summary: Cancel a queued job (releases reservation) or request cancel of a running one
+      parameters:
+        - $ref: '#/components/parameters/GenerationId'
+      responses:
+        '200':
+          description: Canceled, cancel requested, or already canceled
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Generation'
+                  - type: object
+                    properties:
+                      already_canceled: { type: boolean }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404':
+          description: Unknown id or another account's job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '409':
+          description: Terminal jobs cannot be canceled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+  /v1/usage:
+    get:
+      operationId: usage
+      tags: [generations]
+      summary: Current-period allowance, usage and remaining credit
+      responses:
+        '200':
+          description: Usage summary (derived from the append-only ledger)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan_id: { type: string }
+                  period_start: { type: string, format: date }
+                  allowance_credits: { type: integer }
+                  used_credits: { type: integer }
+                  pending_credits: { type: integer }
+                  remaining_credits: { type: integer }
+                  overage_credits: { type: integer }
+                  overage_policy: { type: string, enum: [none, hard_stop, overage] }
+                  active_jobs: { type: integer }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+
+  /v1/webhook_endpoints:
+    post:
+      operationId: registerWebhook
+      tags: [webhooks]
+      summary: Register an endpoint for signed job events (secret shown once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, maxLength: 2048, example: https://example.com/hooks/music }
+                enabled: { type: boolean, default: true }
+      responses:
+        '201':
+          description: Registered; `signing_secret` never returned again
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WebhookEndpoint'
+                  - type: object
+                    required: [signing_secret]
+                    properties:
+                      signing_secret: { type: string, example: whsec_... }
+        '400':
+          description: validation_failed, webhook_url_blocked or webhook_url_invalid
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+    get:
+      operationId: listWebhooks
+      tags: [webhooks]
+      summary: List endpoints (safe metadata, never secrets)
+      responses:
+        '200':
+          description: Endpoints, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  endpoints:
+                    type: array
+                    items: { $ref: '#/components/schemas/WebhookEndpoint' }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+  /v1/webhook_endpoints/{id}:
+    delete:
+      operationId: deleteWebhook
+      tags: [webhooks]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Deleted (pending deliveries for it are removed)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+        '401': { $ref: '#/components/responses/InvalidKey' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API key secret (sv_test_… or sv_live_…)
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sv_session
+  parameters:
+    KeyId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+    GenerationId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, example: gen_01J9ZK3 }
+  responses:
+    ValidationFailed:
+      description: Malformed input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    InvalidKey:
+      description: Missing, invalid or revoked credentials
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          example:
+            error: { type: authentication_error, code: invalid_key, message: API key is invalid or revoked., request_id: req_abc }
+    InsufficientScope:
+      description: Authenticated but not permitted
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    SessionExpired:
+      description: Session missing, expired or revoked
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    NotFound:
+      description: Unknown id, or another tenant's resource (indistinguishable by design)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
   schemas:
     ApiError:
       type: object
@@ -36,7 +677,94 @@ components:
           type: object
           required: [type, code, message, request_id]
           properties:
-            type: { type: string, example: rate_limit_error }
+            type:
+              type: string
+              enum: [authentication_error, authorization_error, validation_error, not_found_error, conflict_error, rate_limit_error, quota_error, provider_error, internal_error]
             code: { type: string, example: parallel_limit_reached }
             message: { type: string }
             request_id: { type: string, example: req_abc123 }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        email_verified_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    Account:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        plan_id: { type: string, example: starter }
+    ApiKey:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        prefix: { type: string, example: sv_live_Ab3d }
+        name: { type: string, nullable: true }
+        scopes: { type: array, items: { type: string } }
+        mode: { type: string, enum: [test, live] }
+        created_by_user_id: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        rotated_from_key_id: { type: string, nullable: true }
+    GenerationInput:
+      type: object
+      required: [prompt, duration_sec, license]
+      properties:
+        prompt: { type: string, minLength: 1, maxLength: 2000 }
+        duration_sec: { type: integer, minimum: 5, maximum: 300 }
+        license: { type: string, enum: [royalty_free, sync, full_ownership] }
+        instrumental: { type: boolean, default: true }
+        metadata:
+          type: object
+          maxProperties: 50
+          additionalProperties: true
+    Generation:
+      type: object
+      properties:
+        id: { type: string, example: gen_01J9ZK3 }
+        status: { type: string, enum: [queued, running, succeeded, failed, canceled] }
+        license: { type: string }
+        prompt: { type: string }
+        duration_sec: { type: integer }
+        instrumental: { type: boolean }
+        metadata: { type: object, nullable: true }
+        credits_reserved: { type: integer }
+        credits_charged: { type: integer, nullable: true }
+        cancel_requested: { type: boolean }
+        output:
+          type: object
+          nullable: true
+          properties:
+            audio_url: { type: string, nullable: true, description: Short-lived signed URL (null until the worker uploads) }
+            duration_sec: { type: number, nullable: true }
+            format: { type: string, nullable: true, example: wav }
+        provider: { type: string, nullable: true }
+        model: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time, nullable: true }
+    WebhookEndpoint:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    WebhookDelivery:
+      type: object
+      description: Signed POST the platform sends per job event (not a path — reference)
+      properties:
+        id: { type: string, example: evt_abc }
+        type: { type: string, example: generation.succeeded }
+        account_id: { type: string }
+        data: { type: object }
+        created_at: { type: string, format: date-time }
+      example:
+        headers:
+          sv-signature: v1=<hex hmac of "<timestamp>.<raw body>">
+          sv-timestamp: '1728645000'
+          sv-event-id: evt_abc123
+        body: { id: evt_abc123, type: generation.succeeded, account_id: acct_1, data: { generation_id: gen_01J9ZK3, status: succeeded }, created_at: '2026-10-09T08:30:41Z' }
