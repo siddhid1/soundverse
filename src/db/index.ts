@@ -9,6 +9,12 @@ export function getPool(): Pool {
   if (pool) return pool;
   const env = getEnv();
   pool = new Pool({ connectionString: env.DATABASE_URL, max: 10 });
+  // A dead idle backend (DB restart, deploy, test teardown) surfaces here.
+  // The pool already evicted it and keeps serving; log instead of crashing
+  // the process via an unhandled 'error' event.
+  pool.on("error", (err) => {
+    console.error(`[db] pool idle-client error: ${(err as Error).message}`);
+  });
   return pool;
 }
 

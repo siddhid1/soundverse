@@ -45,6 +45,7 @@ export async function startTestDb(): Promise<TestDb> {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
     resetEnvCache();
     const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
+    pool.on("error", () => {});
     await runMigrationFiles(pool);
     return { pool, stop: async () => pool.end() };
   }
@@ -75,6 +76,7 @@ export async function startTestDb(): Promise<TestDb> {
   process.env.DATABASE_URL = connectionString;
   resetEnvCache();
   const pool = new Pool({ connectionString });
+  pool.on("error", () => {});
   await runMigrationFiles(pool);
   return {
     pool,
