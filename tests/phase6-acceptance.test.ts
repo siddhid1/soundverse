@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { clearDb, startTestDb, type TestDb } from "./helpers/db.js";
 import { MockMusicProvider } from "../src/providers/mock.js";
 import { ProviderError, type MusicProvider } from "../src/providers/types.js";
+import { currentPeriodStart } from "../src/services/credits.js";
 import { claimNextJob, processOnce, type EngineOptions } from "../src/worker/engine.js";
 import { InMemoryStore } from "../src/storage/store.js";
 
@@ -216,8 +217,7 @@ describe("acceptance gaps", () => {
     expect(extra.json().error.code).toBe("parallel_limit_reached");
   });
 
-  it("unresolvable webhook hosts fail closed", async () => {
-    const { cookie } = await newAccount("starter");
+  it("unresolvable webhook hosts fail closed", async () => {    const { cookie } = await newAccount("starter");
     const secret = await makeKey(cookie);
     const res = await app.inject({
       method: "POST", url: "/v1/webhook_endpoints",
@@ -261,5 +261,70 @@ describe("acceptance gaps", () => {
       expect(typeof body.error.request_id).toBe("string");
       expect(r.headers["x-request-id"]).toBe(body.error.request_id);
     }
+  });
+
+  it("concurrent duplicate signups: one account, one clean 409", async () => {
+    const email = uniqEmail();
+    const results = await Promise.all(
+      [0, 1].map(() =>
+        app.inject({ method: "POST", url: "/auth/signup", payload: { email, password: "correct-horse-12" } }),
+      ),
+    );
+    const codes = results.map((r) => r.statusCode).sort();
+    expect(codes).toEqual([201, 409]);
+    expect(results.find((r) => r.statusCode === 409)!.json().error.code).toBe("email_taken");
+    const users = await db.pool.query(`SELECT COUNT(*)::int AS n FROM users WHERE email=$1`, [email]);
+    expect(users.rows[0].n).toBe(1);
+  });
+
+  it("idempotency keys are scoped per account", async () => {
+    const a = await newAccount("starter");
+    const b = await newAccount("starter");
+    const keyA = await makeKey(a.cookie);
+    const keyB = await makeKey(b.cookie);
+    const body = { prompt: "same key both tenants", duration_sec: 30, license: "royalty_free" as const };
+    const ra = await app.inject({
+      method: "POST", url: "/v1/generations",
+      headers: { authorization: `Bearer ${keyA}`, "idempotency-key": "shared-key" },
+      payload: body,
+    });
+    const rb = await app.inject({
+      method: "POST", url: "/v1/generations",
+      headers: { authorization: `Bearer ${keyB}`, "idempotency-key": "shared-key" },
+      payload: body,
+    });
+    expect(ra.statusCode).toBe(202);
+    expect(rb.statusCode).toBe(202);
+    expect((ra.json() as { id: string }).id).not.toBe((rb.json() as { id: string }).id);
+  });
+
+  it("downgrade mid-flight finalizes honestly: overage recorded, never double-charged", async () => {
+    const { cookie, accountId } = await newAccount("growth");
+    await db.pool.query(
+      `INSERT INTO usage_ledger(id, account_id, type, amount, period_start) VALUES
+         (gen_random_uuid(), $1, 'reservation', 2000, $2),
+         (gen_random_uuid(), $1, 'charge', 2000, $2)`,
+      [accountId, currentPeriodStart()],
+    );
+    const secret = await makeKey(cookie);
+    const created = await app.inject({
+      method: "POST", url: "/v1/generations",
+      headers: { authorization: `Bearer ${secret}`, "idempotency-key": "midflight-1" },
+      payload: { prompt: "mid flight", duration_sec: 30, license: "royalty_free" },
+    });
+    expect(created.statusCode).toBe(202);
+    await db.pool.query(`UPDATE accounts SET plan_id='starter' WHERE id=$1`, [accountId]);
+    expect(await processOnce(db.pool, eng(new MockMusicProvider({ latencyMs: 5, failRate: 0 })))).toMatchObject({
+      outcome: "succeeded",
+    });
+    const sums = await db.pool.query(
+      `SELECT type, SUM(amount)::int AS n FROM usage_ledger WHERE account_id=$1 GROUP BY type`,
+      [accountId],
+    );
+    expect(Object.fromEntries(sums.rows.map((r) => [r.type, r.n]))).toEqual({
+      reservation: 2001,
+      charge: 2000,
+      overage_charge: 1,
+    });
   });
 });
