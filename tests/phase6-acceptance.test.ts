@@ -327,4 +327,36 @@ describe("acceptance gaps", () => {
       overage_charge: 1,
     });
   });
+
+  it("dashboard renders plan, usage, keys and audit from the ledger", async () => {
+    const email = uniqEmail();
+    const password = "correct-horse-12";
+    const signup = await app.inject({ method: "POST", url: "/auth/signup", payload: { email, password } });
+    const token = (signup.json() as { verification_token: string }).verification_token;
+    await app.inject({ method: "GET", url: `/auth/verify?token=${token}` });
+    const login = await app.inject({ method: "POST", url: "/auth/login", payload: { email, password } });
+    const setCookie = login.headers["set-cookie"] as unknown as string;
+    const cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)!.split(";")[0]!;
+    const accountId = (signup.json() as { account: { id: string } }).account.id;
+    await db.pool.query(`UPDATE accounts SET plan_id='starter' WHERE id=$1`, [accountId]);
+    const keyRes = await app.inject({
+      method: "POST", url: "/keys", headers: { cookie },
+      payload: { scopes: ["generations:write", "generations:read"], mode: "live" },
+    });
+    const secret = (keyRes.json() as { secret: string }).secret;
+    const created = await app.inject({
+      method: "POST", url: "/v1/generations",
+      headers: { authorization: `Bearer ${secret}`, "idempotency-key": "dash-1" },
+      payload: { prompt: "dashboard song", duration_sec: 30, license: "royalty_free" },
+    });
+    expect(created.statusCode).toBe(202);
+    expect(await processOnce(db.pool, eng(new MockMusicProvider({ latencyMs: 5, failRate: 0 })))).toMatchObject({
+      outcome: "succeeded",
+    });
+    const dash = await app.inject({ method: "GET", url: "/dashboard", headers: { cookie } });
+    expect(dash.statusCode).toBe(200);
+    for (const needle of ["Remaining:", "Per key", "Per day", "Recent audit", "sv_live_", "Starter"]) {
+      expect(dash.body).toContain(needle);
+    }
+  });
 });

@@ -3,15 +3,17 @@ import { getPool } from "../db/index.js";
 import { sessionAuth } from "../middleware/auth.js";
 import { listApiKeys } from "../services/apiKeys.js";
 import { listAudit } from "../services/audit.js";
+import { usageBreakdown } from "../services/usage.js";
 
 /** Minimal dashboard (server-rendered). Fancy UI is out of scope; data correctness is not. */
 export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
   app.get("/dashboard", { preHandler: sessionAuth }, async (req, reply) => {
     const pool = getPool();
     const { user, account } = req.sessionAuth!;
-    const [keys, audit] = await Promise.all([
+    const [keys, audit, usage] = await Promise.all([
       listApiKeys(pool, account.id),
       listAudit(pool, account.id, 20),
+      usageBreakdown(pool, { accountId: account.id, planId: account.plan_id }),
     ]);
     const planRes = await pool.query(`SELECT * FROM plans WHERE id=$1`, [account.plan_id]);
     const plan = planRes.rows[0] as Record<string, unknown>;
@@ -24,6 +26,16 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
       .join("");
     const auditRows = audit
       .map((a) => `<tr><td>${esc(a.created_at)}</td><td>${esc(a.action)}</td><td>${esc(a.key_id ?? "—")}</td></tr>`)
+      .join("");
+    const s = usage.summary;
+    const dayRows = usage.per_day
+      .map((d) => `<tr><td>${esc(d.day)}</td><td>${esc(d.used_credits)}</td><td>${esc(d.pending_credits)}</td></tr>`)
+      .join("");
+    const keyRows = usage.per_key
+      .map(
+        (k) =>
+          `<tr><td><code>${esc(k.key_prefix ?? "—")}</code></td><td>${esc(k.key_mode ?? "—")}</td><td>${esc(k.used_credits)}</td><td>${esc(k.pending_credits)}</td></tr>`,
+      )
       .join("");
     void reply.type("text/html").send(`<!doctype html>
 <html><head><meta charset="utf-8"><title>Soundverse API — Dashboard</title></head>
@@ -39,6 +51,15 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
 <h2>API keys</h2>
 <table border="1" cellpadding="6"><tr><th>prefix</th><th>mode</th><th>scopes</th><th>status</th><th>last used</th></tr>${rows}</table>
 <p>Manage keys via the JSON API: <code>POST /keys</code>, <code>GET /keys</code>, <code>POST /keys/:id/revoke</code>, <code>POST /keys/:id/rotate</code> (session cookie required).</p>
+<h2>Usage — period starting ${esc(s.period_start)}</h2>
+<ul>
+<li>Allowance: ${esc(s.allowance_credits)} · Used: ${esc(s.used_credits)} (overage ${esc(s.overage_credits)}) · Pending: ${esc(s.pending_credits)} · <b>Remaining: ${esc(s.remaining_credits)}</b></li>
+<li>Overage policy: ${esc(s.overage_policy)} · Active jobs: ${esc(s.active_jobs)}</li>
+</ul>
+<h3>Per key (current period)</h3>
+<table border="1" cellpadding="6"><tr><th>key</th><th>mode</th><th>used</th><th>pending</th></tr>${keyRows}</table>
+<h3>Per day (last 30 days)</h3>
+<table border="1" cellpadding="6"><tr><th>day</th><th>used</th><th>pending</th></tr>${dayRows}</table>
 <h2>Recent audit</h2>
 <table border="1" cellpadding="6"><tr><th>at</th><th>action</th><th>key</th></tr>${auditRows}</table>
 </body></html>`);
