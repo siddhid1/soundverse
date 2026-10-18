@@ -27,6 +27,18 @@ npm run test:acceptance     # the 14 acceptance scenarios as a checklist
 npm run verify              # build + lint + spec + acceptance + full suite
 ```
 
+Browser console (no curl needed):
+
+```bash
+cd frontend && npm install && npm run dev   # http://localhost:5173
+```
+
+The static UI talks to the API through a dev-server proxy (`/auth`, `/keys`,
+`/audit-log`, `/v1` → `http://localhost:3000`), so sessions work with zero
+backend changes. Bearer keys live in page memory only. See `frontend/README.md`
+for the click-through checklist. Prefer Postman instead? Use `quickstart2.md`.
+
+
 ## Architecture
 
 ```
