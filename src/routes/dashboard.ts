@@ -4,16 +4,18 @@ import { sessionAuth } from "../middleware/auth.js";
 import { listApiKeys } from "../services/apiKeys.js";
 import { listAudit } from "../services/audit.js";
 import { usageBreakdown } from "../services/usage.js";
+import { keyStats } from "../services/monitoring.js";
 
 /** Minimal dashboard (server-rendered). Fancy UI is out of scope; data correctness is not. */
 export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
   app.get("/dashboard", { preHandler: sessionAuth }, async (req, reply) => {
     const pool = getPool();
     const { user, account } = req.sessionAuth!;
-    const [keys, audit, usage] = await Promise.all([
+    const [keys, audit, usage, perKey] = await Promise.all([
       listApiKeys(pool, account.id),
       listAudit(pool, account.id, 30),
       usageBreakdown(pool, { accountId: account.id, planId: account.plan_id }),
+      keyStats(pool, account.id),
     ]);
     const planRes = await pool.query(`SELECT * FROM plans WHERE id=$1`, [account.plan_id]);
     const plan = planRes.rows[0] as Record<string, unknown>;
@@ -31,10 +33,10 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
     const dayRows = usage.per_day
       .map((d) => `<tr><td>${esc(d.day)}</td><td>${esc(d.used_credits)}</td><td>${esc(d.pending_credits)}</td></tr>`)
       .join("");
-    const keyRows = usage.per_key
+    const keyRows = perKey
       .map(
         (k) =>
-          `<tr><td><code>${esc(k.key_prefix ?? "—")}</code></td><td>${esc(k.key_mode ?? "—")}</td><td>${esc(k.used_credits)}</td><td>${esc(k.pending_credits)}</td></tr>`,
+          `<tr><td><code>${esc(k.prefix)}…</code></td><td>${esc(k.mode)}</td><td>${esc(k.songs.total)}</td><td>${esc(k.songs.succeeded)}</td><td>${esc(k.generation_time.avg_seconds)}s</td><td>${esc(k.credits_used)}</td><td>${esc(k.credits_pending)}</td></tr>`,
       )
       .join("");
     void reply.type("text/html").send(`<!doctype html>
@@ -57,7 +59,7 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
 <li>Overage policy: ${esc(s.overage_policy)} · Active jobs: ${esc(s.active_jobs)}</li>
 </ul>
 <h3>Per key (current period)</h3>
-<table border="1" cellpadding="6"><tr><th>key</th><th>mode</th><th>used</th><th>pending</th></tr>${keyRows}</table>
+<table border="1" cellpadding="6"><tr><th>key</th><th>mode</th><th>songs</th><th>succeeded</th><th>avg time</th><th>credits used</th><th>pending</th></tr>${keyRows}</table>
 <h3>Per day (last 30 days)</h3>
 <table border="1" cellpadding="6"><tr><th>day</th><th>used</th><th>pending</th></tr>${dayRows}</table>
 <h2>Recent audit</h2>

@@ -13,6 +13,8 @@ import {
   rotateApiKey,
 } from "../services/apiKeys.js";
 import { listAudit } from "../services/audit.js";
+import { currentPeriodStart } from "../services/credits.js";
+import { keyStats } from "../services/monitoring.js";
 
 const createSchema = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -53,6 +55,13 @@ export async function keyRoutes(app: FastifyInstance): Promise<void> {
   app.get("/keys", async (req, reply) => {
     const keys = await listApiKeys(getPool(), req.sessionAuth!.account.id);
     return reply.send({ keys });
+  });
+
+  // Per-key operational stats (songs, generation time, credits) for the
+  // signed-in account — the same data as /v1/monitoring.per_key.
+  app.get("/keys/stats", async (req, reply) => {
+    const perKey = await keyStats(getPool(), req.sessionAuth!.account.id);
+    return reply.send({ period_start: currentPeriodStart(), per_key: perKey });
   });
 
   app.get("/keys/:id", async (req, reply) => {

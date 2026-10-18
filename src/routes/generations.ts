@@ -22,6 +22,7 @@ import {
 } from "../services/generations.js";
 import { accountIdFromAudioKey } from "../storage/store.js";
 import { s3StoreFromEnv } from "../storage/s3.js";
+import { monitoringReport } from "../services/monitoring.js";
 
 const listQuerySchema = z.object({
   status: generationStatusFilter.optional(),
@@ -159,5 +160,18 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
     const rate = await readRateCounters(getPool(), req.apiAuth!.accountId);
     await applyRateHeaders(reply, req.apiAuth!.planId, rate);
     return reply.send(summary);
+  });
+
+  // One consolidated operational picture for developers: credits, per-key
+  // stats (songs/time/credits), job status counts, recent generations, 30-day
+  // rollup, audit tail and webhook delivery health. Read-only aggregation.
+  app.get("/v1/monitoring", { preHandler: withScope("generations:read") }, async (req, reply) => {
+    const report = await monitoringReport(getPool(), {
+      accountId: req.apiAuth!.accountId,
+      planId: req.apiAuth!.planId,
+    });
+    const rate = await readRateCounters(getPool(), req.apiAuth!.accountId);
+    await applyRateHeaders(reply, req.apiAuth!.planId, rate);
+    return reply.send(report);
   });
 }
