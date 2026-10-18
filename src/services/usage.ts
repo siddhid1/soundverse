@@ -41,7 +41,7 @@ export async function usageBreakdown(
        (COALESCE(SUM(amount) FILTER (WHERE type='reservation'), 0)
         - COALESCE(SUM(amount) FILTER (WHERE type IN ('release','charge','overage_charge')), 0))::int AS pending
      FROM usage_ledger
-     WHERE account_id=$1 AND created_at > now() - interval '30 days'
+     WHERE account_id=$1 AND created_at > now() - interval '30 days' AND type <> 'grant'
      GROUP BY 1 ORDER BY 1 DESC`,
     [opts.accountId],
   );
@@ -51,7 +51,7 @@ export async function usageBreakdown(
        (COALESCE(SUM(l.amount) FILTER (WHERE l.type='reservation'), 0)
         - COALESCE(SUM(l.amount) FILTER (WHERE l.type IN ('release','charge','overage_charge')), 0))::int AS pending
      FROM usage_ledger l LEFT JOIN api_keys k ON k.id = l.key_id
-     WHERE l.account_id=$1 AND l.period_start=$2
+     WHERE l.account_id=$1 AND l.period_start=$2 AND l.type <> 'grant'
      GROUP BY l.key_id, k.prefix, k.mode ORDER BY used DESC`,
     [opts.accountId, period],
   );

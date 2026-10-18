@@ -57,12 +57,12 @@ beforeEach(async () => {
 });
 
 describe("accounts", () => {
-  it("signup creates user + sandbox account; duplicate email is 409", async () => {
+  it("signup creates user + starter account; duplicate email is 409", async () => {
     const email = uniqEmail();
     const res = await app.inject({ method: "POST", url: "/auth/signup", payload: { email, password: "correct-horse-12" } });
     expect(res.statusCode).toBe(201);
     const body = res.json() as { account: { plan_id: string } };
-    expect(body.account.plan_id).toBe("sandbox");
+    expect(body.account.plan_id).toBe("starter");
 
     const dup = await app.inject({ method: "POST", url: "/auth/signup", payload: { email, password: "correct-horse-12" } });
     expect(dup.statusCode).toBe(409);
@@ -98,7 +98,7 @@ describe("accounts", () => {
     const { cookie } = await signupAndLogin();
     const me = await app.inject({ method: "GET", url: "/auth/me", headers: { cookie } });
     expect(me.statusCode).toBe(200);
-    expect(me.json().account.plan_id).toBe("sandbox");
+    expect(me.json().account.plan_id).toBe("starter");
 
     // Wrong password does not reveal whether the email exists.
     const bad = await app.inject({ method: "POST", url: "/auth/login", payload: { email: "nobody@example.com", password: "wrong-password-1" } });

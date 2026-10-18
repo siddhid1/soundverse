@@ -12,7 +12,7 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
     const { user, account } = req.sessionAuth!;
     const [keys, audit, usage] = await Promise.all([
       listApiKeys(pool, account.id),
-      listAudit(pool, account.id, 20),
+      listAudit(pool, account.id, 30),
       usageBreakdown(pool, { accountId: account.id, planId: account.plan_id }),
     ]);
     const planRes = await pool.query(`SELECT * FROM plans WHERE id=$1`, [account.plan_id]);
@@ -53,7 +53,7 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
 <p>Manage keys via the JSON API: <code>POST /keys</code>, <code>GET /keys</code>, <code>POST /keys/:id/revoke</code>, <code>POST /keys/:id/rotate</code> (session cookie required).</p>
 <h2>Usage — period starting ${esc(s.period_start)}</h2>
 <ul>
-<li>Allowance: ${esc(s.allowance_credits)} · Used: ${esc(s.used_credits)} (overage ${esc(s.overage_credits)}) · Pending: ${esc(s.pending_credits)} · <b>Remaining: ${esc(s.remaining_credits)}</b></li>
+<li>Allowance: ${esc(s.allowance_credits)} · Bonus granted: ${esc(s.granted_credits)} · Used: ${esc(s.used_credits)} (overage ${esc(s.overage_credits)}) · Pending: ${esc(s.pending_credits)} · <b>Remaining: ${esc(s.remaining_credits)}</b></li>
 <li>Overage policy: ${esc(s.overage_policy)} · Active jobs: ${esc(s.active_jobs)}</li>
 </ul>
 <h3>Per key (current period)</h3>

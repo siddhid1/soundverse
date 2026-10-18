@@ -29,6 +29,9 @@ const envSchema = z.object({
 
   // Auth / sessions
   SESSION_SECRET: z.string().min(16).default("dev-session-secret-change-me-32chars"),
+  // Spendable credits granted to every new account at signup (ledger 'grant').
+  // Set to 0 to disable. Counts toward the same pool as plan allowance.
+  SIGNUP_BONUS_CREDITS: z.coerce.number().int().nonnegative().default(10_000),
   // Encrypts webhook signing secrets at rest (32-byte hex or utf8; documented in .env.example)
   WEBHOOK_CRYPT_KEY: z.string().min(16).default("dev-webhook-crypt-key-change-me!!"),
 

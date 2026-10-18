@@ -277,14 +277,17 @@ async function finalizeSuccess(
         const sums = await client.query(
           `SELECT
              COALESCE(SUM(amount) FILTER (WHERE type IN ('charge','overage_charge')), 0)::int AS used,
+             COALESCE(SUM(amount) FILTER (WHERE type='grant'), 0)::int AS granted,
              (COALESCE(SUM(amount) FILTER (WHERE type='reservation'), 0)
               - COALESCE(SUM(amount) FILTER (WHERE type IN ('release','charge','overage_charge')), 0))::int AS pending
            FROM usage_ledger WHERE account_id=$1 AND period_start=$2`,
           [live.account_id, live.period_start],
         );
         const used = (sums.rows[0] as { used: number }).used;
+        const granted = (sums.rows[0] as { granted: number }).granted;
         const pendingExcl = (sums.rows[0] as { pending: number }).pending - live.reserved_credits;
-        const covered = Math.max(0, Math.min(live.reserved_credits, plan.monthlyAllowanceCredits - used - pendingExcl));
+        // Spendable pool = plan allowance + signup grants.
+        const covered = Math.max(0, Math.min(live.reserved_credits, plan.monthlyAllowanceCredits + granted - used - pendingExcl));
         charged = live.reserved_credits;
         if (covered > 0) {
           await client.query(

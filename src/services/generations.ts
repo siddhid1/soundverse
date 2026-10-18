@@ -307,14 +307,16 @@ export async function createGeneration(
         const sums = await client.query(
           `SELECT
              COALESCE(SUM(amount) FILTER (WHERE type IN ('charge','overage_charge')), 0) AS used,
+             COALESCE(SUM(amount) FILTER (WHERE type = 'grant'), 0) AS granted,
              COALESCE(SUM(amount) FILTER (WHERE type = 'reservation'), 0)
                - COALESCE(SUM(amount) FILTER (WHERE type IN ('release','charge','overage_charge')), 0) AS pending
            FROM usage_ledger WHERE account_id=$1 AND period_start=$2`,
           [auth.accountId, period],
         );
         const used = Number((sums.rows[0] as { used: string }).used);
+        const granted = Number((sums.rows[0] as { granted: string }).granted);
         const pending = Number((sums.rows[0] as { pending: string }).pending);
-        if (used + pending + cost > plan.monthlyAllowanceCredits) {
+        if (used + pending + cost > plan.monthlyAllowanceCredits + granted) {
           if (plan.overagePolicy === "overage") {
             overageExpected = true;
           } else {
@@ -524,6 +526,7 @@ export interface UsageSummary {
   plan_id: string;
   period_start: string;
   allowance_credits: number;
+  granted_credits: number;
   used_credits: number;
   pending_credits: number;
   remaining_credits: number;
@@ -542,24 +545,27 @@ export async function usageSummary(
     `SELECT
        COALESCE(SUM(amount) FILTER (WHERE type='charge'), 0)::int AS charge,
        COALESCE(SUM(amount) FILTER (WHERE type='overage_charge'), 0)::int AS overage,
+       COALESCE(SUM(amount) FILTER (WHERE type='grant'), 0)::int AS granted,
        (COALESCE(SUM(amount) FILTER (WHERE type='reservation'), 0)
         - COALESCE(SUM(amount) FILTER (WHERE type IN ('release','charge','overage_charge')), 0))::int AS pending
      FROM usage_ledger WHERE account_id=$1 AND period_start=$2`,
     [opts.accountId, period],
   );
-  const row = sums.rows[0] as { charge: number; overage: number; pending: number };
+  const row = sums.rows[0] as { charge: number; overage: number; granted: number; pending: number };
   const active = await pool.query(
     `SELECT COUNT(*)::int AS n FROM generations WHERE account_id=$1 AND status IN ('queued','running')`,
     [opts.accountId],
   );
   const used = row.charge + row.overage;
+  const granted = row.granted;
   return {
     plan_id: plan.id,
     period_start: period,
     allowance_credits: plan.monthlyAllowanceCredits,
+    granted_credits: granted,
     used_credits: used,
     pending_credits: row.pending,
-    remaining_credits: plan.monthlyAllowanceCredits - used - row.pending,
+    remaining_credits: plan.monthlyAllowanceCredits + granted - used - row.pending,
     overage_credits: row.overage,
     overage_policy: plan.overagePolicy,
     active_jobs: (active.rows[0] as { n: number }).n,

@@ -1,9 +1,11 @@
 import argon2 from "argon2";
 import type { Pool } from "pg";
+import { getEnv } from "../config/env.js";
 import { getPool } from "../db/index.js";
 import { generateOpaqueToken, newId, sha256Hex } from "../lib/crypto.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import { appendAudit } from "./audit.js";
+import { currentPeriodStart } from "./credits.js";
 
 /** Precomputed verifier so login timing does not reveal whether an email exists. */
 const DUMMY_HASH = await argon2.hash("nonexistent-user-timing-dummy", { type: argon2.argon2id });
@@ -69,10 +71,21 @@ export async function signup(
       }
       throw e;
     }
-    await client.query(`INSERT INTO accounts(id, owner_user_id, plan_id) VALUES ($1,$2,'sandbox')`, [
+    await client.query(`INSERT INTO accounts(id, owner_user_id, plan_id) VALUES ($1,$2,'starter')`, [
       accountId,
       userId,
     ]);
+    // Spendable signup bonus as an append-only ledger row (origin-provable,
+    // never a mutable balance column). Same transaction as the account, so an
+    // account can never exist without its grant.
+    const bonus = getEnv().SIGNUP_BONUS_CREDITS;
+    if (bonus > 0) {
+      await client.query(
+        `INSERT INTO usage_ledger(id, account_id, key_id, generation_id, type, amount, period_start, metadata)
+         VALUES ($1,$2,NULL,NULL,'grant',$3,$4,$5)`,
+        [newId(), accountId, bonus, currentPeriodStart(), JSON.stringify({ reason: "signup_bonus" })],
+      );
+    }
     const tokenRes = await client.query(
       `INSERT INTO email_verification_tokens(id, user_id, token_hash, expires_at)
        VALUES ($1,$2,$3, now() + make_interval(secs => $4))
@@ -93,7 +106,7 @@ export async function signup(
     );
     return {
       user,
-      account: { id: accountId, plan_id: "sandbox" },
+      account: { id: accountId, plan_id: "starter" },
       verification: { expires_at: expiresAt },
       ...(opts.exposeRawToken || process.env.NODE_ENV === "test" ? { verificationTokenRaw: rawToken } : {}),
     };
