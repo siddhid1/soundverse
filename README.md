@@ -38,7 +38,9 @@ npm test                    # vitest suite
 | Limits (allowance+overage, parallel, hourly/daily, licenses) — enforced in one account-locked tx | ✅ working, concurrency-tested |
 | Idempotency-Key (required, replay free, 409 on reuse, race-safe) | ✅ working, concurrency-tested |
 | Usage ledger (append-only; usage derived from it) | ✅ working |
-| Worker / provider / storage | ⬜ stub only (Phase 4 — jobs stay `queued` until then) |
+| Worker (claim via SKIP LOCKED, leases + heartbeat + recovery, conditional finalize) | ✅ working, tested |
+| Provider (mock w/ latency + failure controls; ElevenLabs adapter behind flag) | ✅ working (mock tested live; adapter tested vs local stub, $0 spend) |
+| Storage (S3 presigned expiring URLs, tenant-scoped keys, memory store for tests) | ✅ working, tested |
 | Webhooks | ⬜ stub only (Phase 5) |
 | Docs / dashboard | 🟡 partial: minimal dashboard HTML + OpenAPI skeleton (full in Phase 7) |
 
