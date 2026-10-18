@@ -1,17 +1,60 @@
-/**
- * Phase 4 placeholder. The durable PostgreSQL worker (SKIP LOCKED claim,
- * lease renewal, provider calls, MinIO upload, conditional finalization)
- * is implemented in Phase 4. This stub keeps `docker-compose worker`
- * and `npm run start:worker` valid from Phase 1.
- */
 import { getEnv } from "./config/env.js";
+import { getPool } from "./db/index.js";
+import { ElevenLabsMusicProvider } from "./providers/elevenlabs.js";
+import { MockMusicProvider } from "./providers/mock.js";
+import { s3StoreFromEnv } from "./storage/s3.js";
+import { processOnce, recoverExpiredJobs, type EngineOptions } from "./worker/engine.js";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function main(): Promise<void> {
   const env = getEnv();
-  // eslint-disable-next-line no-console
-  console.log(`[worker] standby (NODE_ENV=${env.NODE_ENV}). Phase 4 implements job claiming.`);
-  // Keep process alive so compose healthchecks pass; real poll loop replaces this.
-  setInterval(() => {}, 60_000);
+  if (env.PROVIDER === "elevenlabs" && !env.ELEVENLABS_API_KEY) {
+    throw new Error("PROVIDER=elevenlabs requires ELEVENLABS_API_KEY to be set. Refusing to start.");
+  }
+  const pool = getPool();
+  const eng: EngineOptions = {
+    store: s3StoreFromEnv(),
+    testProvider: new MockMusicProvider({ latencyMs: env.MOCK_LATENCY_MS, failRate: env.MOCK_FAIL_RATE }),
+    liveProvider:
+      env.PROVIDER === "elevenlabs"
+        ? new ElevenLabsMusicProvider({
+            apiKey: env.ELEVENLABS_API_KEY,
+            baseUrl: env.ELEVENLABS_BASE_URL,
+            modelId: env.ELEVENLABS_MUSIC_MODEL,
+          })
+        : new MockMusicProvider({ latencyMs: env.MOCK_LATENCY_MS, failRate: env.MOCK_FAIL_RATE }),
+    leaseSec: env.WORKER_LEASE_SEC,
+    maxAttempts: env.WORKER_MAX_ATTEMPTS,
+    providerTimeoutMs: env.PROVIDER_TIMEOUT_MS,
+  };
+  let running = true;
+  const stop = (sig: string) => () => {
+    console.log(`[worker] ${sig} received, finishing current job...`);
+    running = false;
+  };
+  process.on("SIGTERM", stop("SIGTERM"));
+  process.on("SIGINT", stop("SIGINT"));
+  console.log(
+    `[worker] up (provider=${env.PROVIDER}, lease=${env.WORKER_LEASE_SEC}s, maxAttempts=${env.WORKER_MAX_ATTEMPTS})`,
+  );
+  while (running) {
+    try {
+      const recovered = await recoverExpiredJobs(pool, eng);
+      if (recovered > 0) console.log(`[worker] recovered ${recovered} expired job(s)`);
+      const r = await processOnce(pool, eng);
+      if (!r.claimed) await sleep(env.WORKER_POLL_MS);
+    } catch (err) {
+      console.error("[worker] loop error", err);
+      await sleep(env.WORKER_POLL_MS);
+    }
+  }
+  console.log("[worker] shutdown complete");
 }
 
-void main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

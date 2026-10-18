@@ -164,3 +164,22 @@ export const rateCounters = pgTable("rate_counters", {
   windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
   count: integer("count").notNull().default(1),
 });
+
+export const webhookEndpoints = pgTable("webhook_endpoints", {
+  id: uuid("id").primaryKey(),
+  accountId: uuid("account_id").notNull(),
+  url: text("url").notNull(),
+  secretEnc: text("secret_enc").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const outboxEvents = pgTable("outbox_events", {
+  id: text("id").primaryKey(),
+  accountId: uuid("account_id").notNull(),
+  type: text("type").notNull(),
+  payload: jsonb("payload").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+});

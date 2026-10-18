@@ -62,7 +62,8 @@ export interface GenerationRow {
   period_start: string;
 }
 
-const JOB_COLS = `id, account_id, key_id, status, prompt, duration_sec, license, instrumental, metadata,
+/** Column list shared with the worker engine (single source of truth for job reads). */
+export const JOB_COLS = `id, account_id, key_id, status, prompt, duration_sec, license, instrumental, metadata,
   reserved_credits, charged_credits, provider, model, provider_job_id, object_key,
   output_duration_sec, output_format, error_code, error_message, attempts,
   cancel_requested_at, created_at, updated_at, completed_at, period_start`;

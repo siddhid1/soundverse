@@ -24,7 +24,16 @@ const envSchema = z.object({
   // Provider selection: mock by default. Real provider only when explicitly enabled.
   PROVIDER: z.enum(["mock", "elevenlabs"]).default("mock"),
   ELEVENLABS_API_KEY: z.string().optional().default(""),
+  ELEVENLABS_BASE_URL: z.string().default("https://api.elevenlabs.io"),
   ELEVENLABS_MUSIC_MODEL: z.string().default("music-v1"),
+
+  // Worker tuning
+  WORKER_POLL_MS: z.coerce.number().int().positive().default(500),
+  WORKER_LEASE_SEC: z.coerce.number().int().positive().default(120),
+  WORKER_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  MOCK_LATENCY_MS: z.coerce.number().int().nonnegative().default(2000),
+  MOCK_FAIL_RATE: z.coerce.number().min(0).max(1).default(0),
 
   APP_BASE_URL: z.string().default("http://localhost:3000"),
 });
