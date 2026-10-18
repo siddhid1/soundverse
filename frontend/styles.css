@@ -1,5 +1,6 @@
-body { font-family: system-ui, sans-serif; max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
+body { font-family: system-ui, sans-serif; max-width: 1080px; margin: 2rem auto; padding: 0 1rem; }
 .muted { color: #666; font-size: 0.9em; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 #tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
 #tabs button { padding: 0.4rem 0.9rem; cursor: pointer; }
 #tabs button.active { font-weight: bold; }
@@ -10,10 +11,59 @@ label { display: block; margin: 0.5rem 0; }
 input, select { width: 100%; max-width: 420px; padding: 0.3rem; }
 input[type="checkbox"] { width: auto; }
 button { margin-top: 0.5rem; margin-right: 0.4rem; padding: 0.35rem 0.8rem; cursor: pointer; }
+button[disabled] { opacity: 0.5; cursor: not-allowed; }
 table { border-collapse: collapse; margin: 0.7rem 0; width: 100%; }
 td, th { border: 1px solid #ccc; padding: 4px 8px; text-align: left; font-size: 0.92em; overflow-wrap: anywhere; }
+th { background: #fafafa; }
 .out { background: #f6f6f6; padding: 0.7rem; margin: 0.7rem 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: monospace; font-size: 0.85em; }
-#toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff; padding: 0.6rem 1rem; border-radius: 4px; max-width: 90vw; }
+#toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff; padding: 0.6rem 1rem; border-radius: 4px; max-width: 90vw; z-index: 10; }
 #toast.ok { background: #1a7f37; }
 audio { width: 100%; margin-top: 0.7rem; }
 .secret { font-size: 1.05em; background: #fff8dd; padding: 0.5rem; border: 1px dashed #999; }
+
+/* cards + stat tiles */
+.card { border: 1px solid #e0e0e0; border-radius: 6px; padding: 0.9rem; margin: 0.8rem 0; background: #fff; }
+.card h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.6rem; }
+.stat { border: 1px solid #e8e8e8; border-radius: 6px; padding: 0.5rem 0.6rem; background: #fafafa; }
+.stat-label { color: #666; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.stat-value { font-size: 1.25rem; font-weight: 600; }
+.stat-value.big { font-size: 1.9rem; }
+.stat-value.good { color: #1a7f37; }
+.stat-value.warn { color: #9a6700; }
+.stat-value.bad { color: #b3261e; }
+
+/* progress bar */
+.progress { height: 10px; border-radius: 999px; background: #ececec; overflow: hidden; min-width: 80px; }
+.progress-fill { height: 100%; background: #4a7fd4; transition: width 0.4s ease; }
+.progress.done .progress-fill { background: #1a7f37; }
+.progress.failed .progress-fill { background: #b3261e; }
+.progress.canceled .progress-fill { background: #9a6700; }
+.progress.big { height: 16px; }
+
+/* badges */
+.badge { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 0.78rem; border: 1px solid #ddd; background: #f5f5f5; white-space: nowrap; }
+.badge.ok { background: #e7f5ec; border-color: #b7dfc5; color: #146c2e; }
+.badge.bad { background: #fdecea; border-color: #f5c2c0; color: #a1160c; }
+.badge.warn { background: #fff6e0; border-color: #f0d9a0; color: #7a5200; }
+.badge.info { background: #e8f0fd; border-color: #bcd2f5; color: #1b4f9c; }
+.badge.credit { background: #f1e8fd; border-color: #d5c2f2; color: #5b21b6; }
+.badge.key { background: #e7f5ec; border-color: #b7dfc5; color: #146c2e; }
+.badge.user { background: #e8f0fd; border-color: #bcd2f5; color: #1b4f9c; }
+
+/* chips (filters) */
+.chips { display: flex; gap: 0.35rem; flex-wrap: wrap; margin: 0.5rem 0; }
+.chip { padding: 0.2rem 0.6rem; border: 1px solid #ddd; border-radius: 999px; background: #fff; cursor: pointer; font-size: 0.85rem; }
+.chip.active { background: #1b4f9c; border-color: #1b4f9c; color: #fff; }
+.toolbar { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin: 0.4rem 0; }
+
+/* 30-day mini bar chart */
+.mini-chart { display: flex; align-items: flex-end; gap: 3px; height: 70px; margin: 0.5rem 0; }
+.mini-col { flex: 1; min-width: 6px; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+.mini-bar { background: #4a7fd4; border-radius: 2px 2px 0 0; min-height: 2px; }
+.mini-bar.pending { background: #c9d8f0; }
+.mini-col:hover { outline: 1px solid #bbb; }
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill { transition: none; }
+}

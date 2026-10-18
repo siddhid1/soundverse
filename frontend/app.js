@@ -66,6 +66,72 @@ const apiKeyFor = () => {
   return apiKey;
 };
 
+/* ---------- shared formatting (used across tabs) ---------- */
+
+/** Mirrors LICENSE_BASE_COST in the API (src/services/credits.ts). */
+const LICENSE_COST = { royalty_free: 1, sync: 6, full_ownership: 14 };
+const JOB_ACTIVE = ["queued", "running"];
+const EVENT_TYPES = [
+  "generation.created",
+  "generation.progress",
+  "generation.succeeded",
+  "generation.failed",
+  "generation.canceled",
+];
+
+/** credits = license_cost x ceil(duration_sec / 60) — same formula as the API. */
+const costFor = (license, durationSec) =>
+  (LICENSE_COST[license] ?? 0) * Math.ceil((Number(durationSec) || 0) / 60);
+
+function fmtSecs(n) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return "—";
+  const s = Math.max(0, Math.round(Number(n)));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+const fmtClock = (d) =>
+  d ? new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+
+function fmtWhen(d) {
+  if (!d) return "—";
+  const date = new Date(d);
+  return Number.isNaN(date.getTime()) ? "—" : `${date.toLocaleDateString()} ${fmtClock(date)}`;
+}
+
+/** Seconds between two timestamps (null when either is missing). */
+const secsBetween = (from, to) =>
+  from && to ? Math.max(0, Math.round((new Date(to) - new Date(from)) / 1000)) : null;
+
+const signed = (n) => `${Number(n) > 0 ? "+" : ""}${n}`;
+
+function progressBarHtml(pct, cls = "") {
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  return `<div class="progress ${cls}"><div class="progress-fill" style="width:${p}%"></div></div>`;
+}
+
+const STATUS_BADGE = { succeeded: "ok", running: "info", queued: "info", failed: "bad", canceled: "warn" };
+const statusBadge = (s) => `<span class="badge ${STATUS_BADGE[s] ?? ""}">${esc(s)}</span>`;
+
+/** Audit actions are grouped by family so the money trail stands out. */
+function actionBadge(action) {
+  const fam = String(action).startsWith("credit.")
+    ? "credit"
+    : String(action).startsWith("key.")
+      ? "key"
+      : "user";
+  return `<span class="badge ${fam}">${esc(action)}</span>`;
+}
+
+/** Credit audit rows read as a ledger: +grant, -charge, hold=reserved, +release. */
+function creditAmountHtml(action, metadata) {
+  const amount = Number(metadata?.amount);
+  if (!Number.isFinite(amount)) return "";
+  const cls = amount > 0 ? "good" : "bad";
+  const label =
+    action === "credit.reserved" ? " held" : action === "credit.released" ? " returned" : "";
+  return `<span class="stat-value ${cls}" style="font-size:0.95rem">${signed(amount)}${esc(label)}</span>`;
+}
+
 /* ---------- tabs ---------- */
 document.querySelectorAll("#tabs button").forEach((b) =>
   b.addEventListener("click", () => {
