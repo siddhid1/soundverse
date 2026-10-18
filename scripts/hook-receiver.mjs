@@ -1,7 +1,7 @@
 import http from "node:http";
 
 /**
- * Tiny local webhook receiver for the QUICKSTART only.
+ * Tiny local webhook receiver for the quickstart flow only.
  * Logs each delivery (headers + body) and always answers 200.
  * It does NOT verify signatures — verify them in your own integration with
  * the documented scheme (HMAC-SHA256 over "<timestamp>.<raw body>",

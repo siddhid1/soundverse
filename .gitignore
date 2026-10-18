@@ -5,3 +5,9 @@ dist/
 coverage/
 *.log
 .drizzle/
+
+# local-only docs — never tracked (see the pre-push purge in git history)
+docs/DEMO.md
+quickstart2.md
+QUICKSTART.md
+IMPLEMENTATION_BRIEF.md

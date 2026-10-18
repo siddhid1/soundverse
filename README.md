@@ -11,8 +11,8 @@ cp .env.example .env        # never commit real secrets or provider keys
 docker compose up --build  # api :3000, worker, webhook-dispatcher, postgres, minio
 ```
 
-Then follow [QUICKSTART.md](QUICKSTART.md) — signup to first song in under five
-minutes with a test key (no spend, no payment).
+Then open the browser console (`cd frontend && npm run dev`) — signup to first
+song in minutes with a test key (no spend, no payment).
 
 Local development without Docker:
 
@@ -36,7 +36,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 The static UI talks to the API through a dev-server proxy (`/auth`, `/keys`,
 `/audit-log`, `/v1` → `http://localhost:3000`), so sessions work with zero
 backend changes. Bearer keys live in page memory only. See `frontend/README.md`
-for the click-through checklist. Prefer Postman instead? Use `quickstart2.md`.
+for the click-through checklist.
 
 
 ## Architecture
@@ -105,7 +105,7 @@ final database + ledger state, not just response codes. 63 tests, all green.
 | Providers (mock w/ latency+failure controls; ElevenLabs adapter env-gated, $0 spent) | ✅ working |
 | Storage (tenant-scoped keys, presigned expiring URLs) | ✅ working, e2e-verified |
 | Webhooks (endpoint CRUD, HMAC delivery, outbox, retries, dead-letter, SSRF guards) | ✅ working, tested |
-| Docs (OpenAPI 3.1 matching behavior, quickstart, DECISIONS/AI_USAGE/SECURITY) | ✅ this repo |
+| Docs (OpenAPI 3.1 matching behavior, DECISIONS/AI_USAGE/SECURITY) | ✅ this repo |
 
 ### Known limitations (see DECISIONS.md / SECURITY.md for the full lists)
 
@@ -118,7 +118,6 @@ final database + ledger state, not just response codes. 63 tests, all green.
 
 ## Further reading
 
-- [QUICKSTART.md](QUICKSTART.md) — first song in five minutes
 - [openapi/openapi.yaml](openapi/openapi.yaml) — the full contract
 - [DECISIONS.md](DECISIONS.md) — what we chose, what we cut, and why
 - [SECURITY.md](SECURITY.md) — one-page threat model

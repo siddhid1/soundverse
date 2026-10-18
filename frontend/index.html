@@ -160,7 +160,7 @@
         <thead><tr><th>url</th><th>enabled</th><th>created</th><th></th></tr></thead>
         <tbody id="wh-rows"></tbody>
       </table>
-      <p class="muted">Deliveries are HMAC-signed (<code>sv-signature</code> over <code>"&lt;timestamp&gt;.&lt;raw body&gt;"</code>, 300s tolerance, stable <code>sv-event-id</code> for dedupe). Per-delivery retry state lives server-side; query it with SQL (see docs/DEMO.md appendix B).</p>
+      <p class="muted">Deliveries are HMAC-signed (<code>sv-signature</code> over <code>"&lt;timestamp&gt;.&lt;raw body&gt;"</code>, 300s tolerance, stable <code>sv-event-id</code> for dedupe). Per-delivery retry state lives server-side; query the `webhook_deliveries` table with SQL.</p>
     </section>
 
     <section id="tab-audit" class="tab hidden">
