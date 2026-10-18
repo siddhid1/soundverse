@@ -89,6 +89,8 @@ export async function startTestDb(): Promise<TestDb> {
 /** Remove all tenant data between tests. Plans are seed data and are kept. */
 export async function clearDb(pool: Pool): Promise<void> {
   await pool.query(
-    `TRUNCATE TABLE audit_logs, api_keys, sessions, email_verification_tokens, accounts, users, schema_meta CASCADE`,
+    `TRUNCATE TABLE audit_logs, api_keys, sessions, email_verification_tokens,
+       generations, idempotency_records, usage_ledger, rate_counters,
+       accounts, users, schema_meta CASCADE`,
   );
 }
