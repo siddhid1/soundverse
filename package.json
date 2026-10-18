@@ -1,0 +1,43 @@
+{
+  "name": "soundverse-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-serve developer API for AI music generation",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "start:worker": "node dist/worker.js",
+    "start:webhooks": "node dist/webhooks.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "openapi:lint": "node -e \"const fs=require('fs');const y=fs.readFileSync('openapi/openapi.yaml','utf8');if(!y.includes('openapi: 3.1')){console.error('openapi version missing');process.exit(1)}console.log('openapi skeleton ok')\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.782.0",
+    "@aws-sdk/s3-request-presigner": "^3.782.0",
+    "@fastify/cookie": "^11.0.1",
+    "@fastify/formbody": "^8.0.1",
+    "@fastify/rate-limit": "^10.1.1",
+    "argon2": "^0.41.1",
+    "drizzle-orm": "^0.36.4",
+    "fastify": "^5.2.1",
+    "pg": "^8.13.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/pg": "^8.11.0",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

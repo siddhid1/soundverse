@@ -1,0 +1,42 @@
+openapi: 3.1.0
+info:
+  title: Soundverse Enterprise Music API
+  version: 0.1.0
+  description: >-
+    Self-serve developer API for AI music generation. Phase 1 skeleton —
+    full paths for /v1/generations, /v1/usage and /v1/webhook_endpoints
+    are added in Phase 3/5 and must match actual behavior.
+servers:
+  - url: http://localhost:3000
+    description: Local Docker Compose
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Service is alive
+  /ready:
+    get:
+      operationId: ready
+      summary: Readiness probe (database connectivity)
+      responses:
+        '200':
+          description: Ready
+        '503':
+          description: Not ready
+components:
+  schemas:
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [type, code, message, request_id]
+          properties:
+            type: { type: string, example: rate_limit_error }
+            code: { type: string, example: parallel_limit_reached }
+            message: { type: string }
+            request_id: { type: string, example: req_abc123 }

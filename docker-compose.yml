@@ -1,0 +1,98 @@
+name: soundverse
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: soundverse
+      POSTGRES_PASSWORD: soundverse
+      POSTGRES_DB: soundverse
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soundverse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgres://soundverse:soundverse@postgres:5432/soundverse
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: soundverse-audio
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_FORCE_PATH_STYLE: "true"
+      SESSION_SECRET: dev-session-secret-change-me-32chars
+      WEBHOOK_CRYPT_KEY: dev-webhook-crypt-key-change-me!!
+      PROVIDER: mock
+      APP_BASE_URL: http://localhost:3000
+    ports:
+      - "3000:3000"
+    command: sh -c "npm run db:migrate && node dist/server.js"
+
+  worker:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://soundverse:soundverse@postgres:5432/soundverse
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: soundverse-audio
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_FORCE_PATH_STYLE: "true"
+      PROVIDER: mock
+      SESSION_SECRET: dev-session-secret-change-me-32chars
+      WEBHOOK_CRYPT_KEY: dev-webhook-crypt-key-change-me!!
+    command: sh -c "node dist/worker.js"
+
+  webhook-dispatcher:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://soundverse:soundverse@postgres:5432/soundverse
+      SESSION_SECRET: dev-session-secret-change-me-32chars
+      WEBHOOK_CRYPT_KEY: dev-webhook-crypt-key-change-me!!
+    command: sh -c "node dist/webhooks.js"
+
+volumes:
+  pgdata:
+  miniodata:
