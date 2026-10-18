@@ -131,9 +131,23 @@
 
     <section id="tab-usage" class="tab hidden">
       <h2>Usage &amp; credits</h2>
-      <p class="muted">Bearer key required (usage is per account, across all keys).</p>
-      <button type="button" id="btn-usage-reload">Reload usage</button>
-      <div id="usage-out" class="out"></div>
+      <p class="muted">Bearer key required (credits are pooled per account, across all keys). <a href="http://localhost:3000/dashboard" target="_blank" rel="noopener">server /dashboard</a> shows the same data HTML-rendered.</p>
+      <div class="toolbar">
+        <button type="button" id="btn-usage-reload">Reload</button>
+        <label style="margin:0"><input type="checkbox" id="usage-auto" style="width:auto" /> auto-refresh while generating</label>
+      </div>
+
+      <div class="card">
+        <h3>Balance — period starting <span id="usage-period">—</span></h3>
+        <div class="stats" id="usage-balance"></div>
+        <p class="muted" id="usage-formula"></p>
+      </div>
+
+      <div class="card">
+        <h3>Credits per API key (current period)</h3>
+        <div class="stats" id="usage-key-stats"></div>
+      </div>
+
       <h3>Price list</h3>
       <table>
         <thead><tr><th>license</th><th>credits / started 60s</th></tr></thead>
@@ -143,7 +157,11 @@
           <tr><td>full_ownership</td><td>14</td></tr>
         </tbody>
       </table>
-      <p class="muted">Billing period = UTC calendar month, no rollover. <code>credits = license_cost × ceil(duration_sec / 60)</code>. Reservations count as pending until finalized. Per-key and per-day breakdowns live on the server-rendered dashboard (<a href="http://localhost:3000/dashboard" target="_blank" rel="noopener">open /dashboard</a>, same session cookie).</p>
+      <p class="muted">
+        <code>credits = license_cost × ceil(duration_sec / 60)</code>. Billing period = UTC calendar month, no rollover.
+        Reservations are <em>held</em> (pending) at creation and settled when the render finishes; cancels release the hold.
+        Test keys are free — they always reserve 0 and never touch the balance.
+      </p>
     </section>
 
     <section id="tab-webhooks" class="tab hidden">

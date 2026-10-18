@@ -301,8 +301,9 @@ $("form-gen").addEventListener("submit", async (e) => {
     });
     currentJobId = data.id;
     renderJob(data, replayed);
-    toast(replayed ? "Idempotent replay — no second job, no second charge." : `Queued (reserved ${data.credits_reserved}).`, true);
+    toast(replayed ? "Idempotent replay — no second job, no second charge." : `Queued (held ${data.credits_reserved} credits).`, true);
     await reloadJobs();
+    void refreshUsageQuiet(); // balance drops as the hold is taken
   } catch (err) {
     toast(String(err.message || err));
   }
@@ -378,8 +379,9 @@ $("btn-job-cancel").addEventListener("click", async () => {
     apiKeyFor();
     const { data } = await dev(`/v1/generations/${currentJobId}/cancel`, { method: "POST" });
     renderJob(data);
-    toast(data.status === "canceled" ? "Canceled (reservation released)." : "Cancel requested (worker will honor it).", true);
+    toast(data.status === "canceled" ? "Canceled (held credits released)." : "Cancel requested (worker will honor it).", true);
     await reloadJobs();
+    void refreshUsageQuiet();
   } catch (err) {
     toast(String(err.message || err));
   }
@@ -398,18 +400,76 @@ $("btn-job-poll").addEventListener("click", () => {
 });
 
 /* ---------- usage ---------- */
+let usageAutoTimer = null;
+
+/** Refresh quietly (e.g. after generating) — errors are not worth a toast. */
+async function refreshUsageQuiet() {
+  if (!$("usage-auto").checked || !apiKey) return;
+  try {
+    await loadUsage();
+  } catch {
+    /* keep the last known balance visible */
+  }
+}
+
+function statTile(label, value, cls = "") {
+  return `<div class="stat"><div class="stat-label">${esc(label)}</div><div class="stat-value ${cls}">${esc(value)}</div></div>`;
+}
+
+async function loadUsage() {
+  apiKeyFor();
+  const { data: s } = await dev("/v1/usage");
+  $("usage-period").textContent = s.period_start ?? "—";
+  const remaining = Number(s.remaining_credits);
+  $("usage-balance").innerHTML = [
+    statTile("remaining", remaining, remaining > 0 ? "big good" : remaining === 0 ? "big warn" : "big bad"),
+    statTile("plan allowance", s.allowance_credits),
+    statTile("bonus granted", s.granted_credits, s.granted_credits > 0 ? "good" : ""),
+    statTile("used", s.used_credits, s.used_credits > 0 ? "warn" : ""),
+    statTile("pending (held)", s.pending_credits, s.pending_credits > 0 ? "warn" : ""),
+    statTile("overage", s.overage_credits, s.overage_credits > 0 ? "bad" : ""),
+    statTile("active jobs", s.active_jobs),
+  ].join("");
+  $("usage-formula").textContent =
+    `remaining = allowance (${s.allowance_credits}) + bonus (${s.granted_credits}) − used (${s.used_credits}) − pending (${s.pending_credits}) = ${remaining} · overage policy: ${s.overage_policy}`;
+  await loadKeyStats();
+  return s;
+}
+
+/** Per-key credit attribution via the session-scoped /keys/stats endpoint. */
+async function loadKeyStats() {
+  const res = await sess("/keys/stats");
+  const perKey = (res.per_key ?? []).filter((k) => k.credits_used > 0 || k.credits_pending > 0 || k.songs.total > 0);
+  if (perKey.length === 0) {
+    $("usage-key-stats").innerHTML = `<p class="muted">No credit usage yet — generate a song to see per-key attribution.</p>`;
+    return;
+  }
+  $("usage-key-stats").innerHTML =
+    `<table><thead><tr><th>key</th><th>mode</th><th>songs</th><th>credits used</th><th>pending</th></tr></thead><tbody>` +
+    perKey
+      .map(
+        (k) =>
+          `<tr><td><code>${esc(k.prefix)}…</code></td><td>${esc(k.mode)}</td><td>${esc(k.songs.total)}</td>` +
+          `<td>${esc(k.credits_used)}</td><td>${esc(k.credits_pending)}</td></tr>`,
+      )
+      .join("") +
+    `</tbody></table>`;
+}
+
 $("btn-usage-reload").addEventListener("click", async () => {
   try {
-    apiKeyFor();
-    const { data: s } = await dev("/v1/usage");
-    $("usage-out").textContent =
-      `plan: ${s.plan_id} (period ${s.period_start})\n` +
-      `allowance ${s.allowance_credits} · used ${s.used_credits} (overage ${s.overage_credits}) · pending ${s.pending_credits}\n` +
-      `REMAINING: ${s.remaining_credits}  ·  overage policy: ${s.overage_policy}  ·  active jobs: ${s.active_jobs}\n\n` +
-      `Per-key and per-day breakdowns are on the server dashboard (/dashboard, same session) —\n` +
-      `this API view reports account totals only.`;
+    await loadUsage();
   } catch (err) {
     toast(String(err.message || err));
+  }
+});
+
+$("usage-auto").addEventListener("change", () => {
+  clearInterval(usageAutoTimer);
+  usageAutoTimer = null;
+  if ($("usage-auto").checked) {
+    usageAutoTimer = setInterval(refreshUsageQuiet, 5000);
+    refreshUsageQuiet();
   }
 });
 
