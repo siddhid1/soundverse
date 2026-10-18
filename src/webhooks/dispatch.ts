@@ -8,7 +8,6 @@ import {
   signDelivery,
 } from "./sign.js";
 import { SsrfError, assertUrlAllowed } from "./ssrf.js";
-import { newId } from "../lib/crypto.js";
 
 export interface DispatchOptions {
   allowPrivate: boolean;
@@ -50,12 +49,14 @@ export async function fanOut(pool: Pool, batchSize: number): Promise<number> {
         [batchSize],
       );
       for (const row of claimed.rows as { id: string; account_id: string }[]) {
+        // gen_random_uuid() per row: one INSERT...SELECT fans out to N
+        // endpoints, and each delivery needs its own primary key.
         await client.query(
           `INSERT INTO webhook_deliveries(id, event_id, endpoint_id, account_id)
-           SELECT $1, $2, we.id, $3 FROM webhook_endpoints we
-           WHERE we.account_id=$3 AND we.enabled
+           SELECT gen_random_uuid(), $1, we.id, $2 FROM webhook_endpoints we
+           WHERE we.account_id=$2 AND we.enabled
            ON CONFLICT (event_id, endpoint_id) DO NOTHING`,
-          [newId(), row.id, row.account_id],
+          [row.id, row.account_id],
         );
       }
       await client.query("COMMIT");
