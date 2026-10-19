@@ -68,6 +68,7 @@ export const codeToStatus: Record<string, number> = {
   hourly_rate_limit: 429,
   daily_rate_limit: 429,
   allowance_exceeded: 429,
+  platform_rate_limit: 429,
   // 5xx
   provider_error: 502,
   provider_timeout: 504,

@@ -69,6 +69,15 @@ const envSchema = z.object({
   MOCK_FAIL_RATE: z.coerce.number().min(0).max(1).default(0),
 
   APP_BASE_URL: z.string().default("http://localhost:3000"),
+
+  // Public read-only platform aggregates (GET /v1/platform/stats). Counts and
+  // sums only — no per-account rows, no PII. Kill-switch: set to false to 404
+  // the route without a redeploy of dependent code.
+  PLATFORM_STATS_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => v === "true" || v === "1")
+    .pipe(z.boolean()),
 }).superRefine((env, ctx) => {
   if (env.MOCK_LATENCY_MAX_MS > 0 && env.MOCK_LATENCY_MIN_MS > env.MOCK_LATENCY_MAX_MS) {
     ctx.addIssue({

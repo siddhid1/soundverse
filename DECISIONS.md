@@ -189,6 +189,25 @@ test doubles stay quiet.
 13. Starter + `full_ownership` → 403 before any job/ledger row exists.
 14. Polling at the parallel cap → reads stay 200 (limits apply to POST only).
 
+## D15. Public platform aggregates are additive and aggregate-only
+
+`GET /v1/platform/stats` exposes platform-wide COUNT/SUM/AVG numbers with no
+authentication. The safety case is structural, not promised: the SELECT lists
+contain no email, prompt, metadata, hash, secret, or per-account/per-key row,
+so the handler cannot leak what it never selects — enforced by a test that
+fails the build if any forbidden field appears. Cross-account visibility
+without per-account auth was a conscious trade: the endpoint answers only
+questions that are already answerable in aggregate, and `PLATFORM_STATS_ENABLED`
+(default on) 404s the route without a redeploy. A narrow per-IP limiter
+(60/min, `Retry-After`) replaces the account-level quota machinery, which
+cannot apply without an account. The `:5174` operator console consumes it
+with zero credentials; its key-watch view (client-side totals over pasted
+keys) predates the endpoint and stays as the per-account drill-down. No
+existing route, auth check, or limit was modified for this — purely new
+files plus one registration line and one additive env key.
+Change my mind: per-account rows, PII, or write actions on this surface —
+any of those reopens the admin-auth question (D-teams/roles cut).
+
 ## Explicit cuts (not built)
 
 Redis/Kafka (D1), Stripe overage billing, team members/roles, provider

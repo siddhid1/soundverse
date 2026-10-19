@@ -21,6 +21,8 @@ tags:
     description: Async music generation (Bearer key required)
   - name: webhooks
     description: Signed delivery of job events (Bearer key required)
+  - name: platform
+    description: Public aggregate stats (no auth)
 paths:
   /health:
     get:
@@ -595,6 +597,35 @@ paths:
         '401': { $ref: '#/components/responses/InvalidKey' }
         '403': { $ref: '#/components/responses/InsufficientScope' }
 
+  /v1/platform/stats:
+    get:
+      operationId: platformStats
+      tags: [platform]
+      summary: Public platform-wide aggregates (no auth, counts and sums only)
+      description: >
+        Read-only rollup across all accounts: account counts by plan, job
+        counts by status, credit totals for the current billing period,
+        per-license splits, key counts, 30-day daily usage and 24h webhook
+        delivery health. No authentication. Never returns per-account rows,
+        prompts, emails, hashes or secrets. Rate-limited per IP (60/min,
+        `Retry-After` on 429). Returns 404 when PLATFORM_STATS_ENABLED=false.
+      responses:
+        '200':
+          description: Platform stats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformStats' }
+        '404':
+          description: Disabled via PLATFORM_STATS_ENABLED=false
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '429':
+          description: platform_rate_limit — per-IP 60/min exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+
   /v1/webhook_endpoints:
     post:
       operationId: registerWebhook
@@ -913,6 +944,67 @@ components:
             endpoints:
               type: array
               items: { $ref: '#/components/schemas/WebhookEndpoint' }
+            deliveries_last_24h:
+              type: object
+              properties:
+                delivered: { type: integer }
+                failed: { type: integer }
+                dead: { type: integer }
+                pending: { type: integer }
+    PlatformStats:
+      type: object
+      description: Platform-wide counts and sums only — no per-account rows, no PII, no secrets.
+      properties:
+        period_start: { type: string, format: date }
+        generated_at: { type: string, format: date-time }
+        accounts:
+          type: object
+          properties:
+            total: { type: integer }
+            by_plan: { type: object, additionalProperties: { type: integer } }
+        jobs:
+          type: object
+          properties:
+            by_status: { type: object, additionalProperties: { type: integer } }
+            active: { type: integer }
+            generation_time:
+              type: object
+              properties:
+                avg_seconds: { type: number }
+                max_seconds: { type: number }
+        credits:
+          type: object
+          properties:
+            allowance: { type: integer }
+            granted: { type: integer }
+            used: { type: integer }
+            pending: { type: integer }
+            overage: { type: integer }
+            remaining: { type: integer }
+            by_license:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  songs: { type: integer }
+                  credits: { type: integer }
+        keys:
+          type: object
+          properties:
+            total: { type: integer }
+            active: { type: integer }
+        usage_30d:
+          type: array
+          items:
+            type: object
+            properties:
+              day: { type: string, format: date }
+              songs: { type: integer }
+              used_credits: { type: integer }
+        webhooks:
+          type: object
+          properties:
+            endpoints: { type: integer }
             deliveries_last_24h:
               type: object
               properties:
