@@ -527,6 +527,13 @@ function statTile(label, value, cls = "") {
 }
 
 async function loadUsage() {
+  if (!apiKey && !$("gen-key").value.trim()) {
+    $("usage-period").textContent = "—";
+    $("usage-balance").innerHTML = `<p class="muted">Paste an API key on the Generate tab first — credits are pooled per account, across all keys.</p>`;
+    $("usage-formula").textContent = "";
+    $("usage-key-stats").innerHTML = `<p class="muted">No key loaded yet.</p>`;
+    return null;
+  }
   apiKeyFor();
   const { data: s } = await dev("/v1/usage");
   $("usage-period").textContent = s.period_start ?? "—";
@@ -542,13 +549,23 @@ async function loadUsage() {
   ].join("");
   $("usage-formula").textContent =
     `remaining = allowance (${s.allowance_credits}) + bonus (${s.granted_credits}) − used (${s.used_credits}) − pending (${s.pending_credits}) = ${remaining} · overage policy: ${s.overage_policy}`;
-  await loadKeyStats();
+  try {
+    await loadKeyStats();
+  } catch (err) {
+    // Balance above is already rendered — per-key attribution is best-effort.
+    $("usage-key-stats").innerHTML = `<p class="muted">Per-key stats unavailable (${esc(String(err.message || err))}). Balance above is still accurate.</p>`;
+  }
   return s;
 }
 
 /** Per-key credit attribution via the session-scoped /keys/stats endpoint. */
 async function loadKeyStats() {
-  const res = await sess("/keys/stats");
+  let res;
+  try {
+    res = await sess("/keys/stats");
+  } catch (err) {
+    throw new Error("key stats unavailable — sign in again on the Account tab");
+  }
   const perKey = (res.per_key ?? []).filter((k) => k.credits_used > 0 || k.credits_pending > 0 || k.songs.total > 0);
   if (perKey.length === 0) {
     $("usage-key-stats").innerHTML = `<p class="muted">No credit usage yet — generate a song to see per-key attribution.</p>`;
@@ -588,7 +605,16 @@ let monTimer = null;
 
 async function loadMonitoring() {
   apiKeyFor();
-  const { data: m } = await dev("/v1/monitoring");
+  let m;
+  try {
+    ({ data: m } = await dev("/v1/monitoring"));
+  } catch (err) {
+    const msg = String(err.message || err);
+    if (msg.includes("404") || msg.includes("not_found") || msg.includes("HTTP 404")) {
+      throw new Error("GET /v1/monitoring 404 — backend predates the monitoring build. Rebuild the api: docker compose up --build.");
+    }
+    throw err;
+  }
 
   $("mon-period").textContent = `period ${m.account.period_start} · plan ${m.account.plan_id}`;
   const c = m.credits ?? {};

@@ -37,6 +37,12 @@ and the webhook encryption key. Receivers are untrusted (must verify).
 - **Secrets handling**: env-only config, `.env.example` with placeholders, no
   secrets in logs (verification links are tokens by design), responses, or the
   repo; error shape never leaks internals.
+- **Signup bonus abuse**: new accounts start on `starter` with a 10,000-credit
+  ledger grant. Live keys require a verified email (login rejects unverified,
+  and live key creation re-checks `email_verified_at`), so an unverified
+  address cannot mint a spendable key. A verified address can still spend the
+  bonus on the real provider when `PROVIDER=elevenlabs` — treat the bonus size
+  as a business decision and review before enabling paid models.
 
 ## Residual risks and explicit non-goals
 

@@ -77,6 +77,18 @@ export async function createApiKey(
   if (input.mode !== "test" && input.mode !== "live") {
     throw coded("invalid_mode", `Mode must be "test" or "live".`);
   }
+  if (input.mode === "live") {
+    // Defense-in-depth: login already requires verification, but live keys are
+    // billable so re-check explicitly — an unverified account must never mint
+    // a key that can spend the signup bonus on the real provider.
+    const owner = await pool.query(
+      `SELECT u.email_verified_at FROM accounts a JOIN users u ON u.id = a.owner_user_id WHERE a.id=$1`,
+      [input.accountId],
+    );
+    if ((owner.rowCount ?? 0) === 0 || !(owner.rows[0] as { email_verified_at: string | null }).email_verified_at) {
+      throw coded("email_not_verified", "Verify your email before creating a live key.");
+    }
+  }
   const { secret, prefix } = generateApiSecret(input.mode);
   const id = newId();
   const res = await pool.query(
