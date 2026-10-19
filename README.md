@@ -59,34 +59,42 @@ purpose, to demo retries → dead-letter. Register the endpoint as
 ## Architecture
 
 ```
-                ┌─────────────┐
-  developer ──▶ │  API (3000) │──▶ PostgreSQL (accounts, keys, jobs,
-                └─────────────┘    idempotency, ledger, counters, outbox)
-                        │                ▲            │
-                        │ jobs           │ claim      │ outbox events
-                        ▼                │ (SKIP      ▼
-                ┌─────────────┐   LOCKED) │   ┌──────────────────┐
-                │   worker    │───────────┘   │ webhook-dispatcher│──▶ receivers
-                └──────┬──────┘               └──────────────────┘   (signed)
-                       │ S3 PutObject (private bucket)
-                       ▼
-                ┌─────────────┐
-                │ MinIO / S3  │── presigned GET (15 min) ──▶ developer
-                └─────────────┘
+                 ┌─────────────┐
+   developer ──▶ │  API (3000) │──▶ PostgreSQL (accounts, keys, jobs,
+   │             └─────────────┘    idempotency, ledger, counters, outbox)
+   │ poll status      │                ▲            │
+   │ + audio URL      │ 202            │ claim      │ outbox events
+   │                  ▼                │ (SKIP      ▼
+   │             ┌─────────┐    ┌─────────────┐   ┌──────────────────┐
+   │             │ providers│◀───│   worker    │   │ webhook-dispatcher│──▶ receivers
+   │             │ mock /   │    └──────┬──────┘   └──────────────────┘  (signed +
+   │             │ elevenlabs    │ S3 PutObject      retry → dead-letter)
+   │             └─────────┘     ▼
+   │                      ┌─────────────┐
+   └──── presigned GET ── │ MinIO / S3  │ (private bucket, tenant-scoped keys;
+    (?expires_in,          └─────────────┘  TTL 60-900s, default 15 min)
+    default 15 min)
+
+operator console (:5174) ── GET /v1/platform/stats (public aggregates, no auth)
 ```
 
 - **API** handles dashboard sessions, Bearer-key auth, and the one atomic
   acceptance transaction: idempotency check → account lock → license →
   allowance/overage → hourly/daily quotas → parallel count → reserve → job +
-  ledger + idempotency row → `202`. It never waits for rendering.
-- **Worker** claims queued jobs (`FOR UPDATE SKIP LOCKED`), calls the mock or
-  real provider (test keys always mock), uploads audio to tenant-scoped storage
+  ledger + idempotency row + `generation.created` outbox event → `202`. It never waits for rendering.
+- **Worker** claims queued jobs (`FOR UPDATE SKIP LOCKED`), renders via the
+  mock or real provider (test keys always mock), uploads audio to tenant-scoped storage
   keys, and finalizes with a conditional `status='running'` update plus exactly
-  one ledger settlement and one outbox event. Leases + heartbeat + recovery
+  one ledger settlement and one terminal outbox event. Leases + heartbeat + recovery
   survive restarts.
+- **Polling is the primary completion path**: `GET /v1/generations/{id}` returns
+  `queued → running (progress 10→25→50→75) → succeeded` plus a short-lived
+  signed `audio_url` minted after an ownership check (`?expires_in=`, 60–900s).
 - **Webhook dispatcher** fans outbox events to endpoints and delivers them
   signed (HMAC-SHA256, timestamp, stable event id) with bounded exponential
   retries and a dead-letter state. Job results never depend on delivery.
+- **Platform stats** (`GET /v1/platform/stats`, no auth) expose counts/sums
+  only — no per-account rows — consumed by the separate `:5174` operator console.
 - **PostgreSQL** is the source of truth for everything, including the queue —
   no Redis/Kafka (see DECISIONS.md). **MinIO** (S3-compatible) stores audio;
   URLs are presigned and expire.
