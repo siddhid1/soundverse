@@ -26,7 +26,8 @@ CORS is involved. **The backend needs zero changes.**
    revoke (old key 401s on next use).
 3. Generate: paste a key (page memory only — never stored) → create with an
    auto-generated Idempotency-Key → re-submit unchanged (free replay banner) →
-   poll to `succeeded` → audio plays in the embedded player → cancel a queued
+   poll to `succeeded` → audio plays in the embedded player → "Copy 3-min
+   share link" for an anyone-can-stream 180s URL → cancel a queued
    job (reservation released).
 4. Usage: remaining/used/pending match `GET /v1/usage`; pricing table matches
    `LICENSE_BASE_COST`.

@@ -30,7 +30,16 @@ const listQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 
-async function withAudioUrl(row: GenerationRow): Promise<Record<string, unknown>> {
+/**
+ * ?expires_in=<seconds> overrides the signed audio-URL TTL (share links).
+ * Range 60–900: callers may only ask for *less* than the 15-minute default,
+ * never more. Invalid values are 400, before any URL is minted.
+ */
+const audioTtlQuerySchema = z.object({
+  expires_in: z.coerce.number().int().min(60).max(900).optional(),
+});
+
+async function withAudioUrl(row: GenerationRow, ttlSec?: number): Promise<Record<string, unknown>> {
   const job = toPublicJob(row);
   if (row.status === "succeeded" && row.object_key) {
     // Defense in depth: the SQL already scoped this row to the caller's
@@ -39,7 +48,10 @@ async function withAudioUrl(row: GenerationRow): Promise<Record<string, unknown>
     if (accountIdFromAudioKey(row.object_key) !== row.account_id) {
       throw new Error("Storage key scope mismatch.");
     }
-    const url = await s3StoreFromEnv().presignedGet(row.object_key, getEnv().AUDIO_URL_TTL_SEC);
+    const url = await s3StoreFromEnv().presignedGet(
+      row.object_key,
+      ttlSec ?? getEnv().AUDIO_URL_TTL_SEC,
+    );
     job.output = { audio_url: url, duration_sec: row.output_duration_sec, format: row.output_format };
   }
   return job;
@@ -127,10 +139,24 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/v1/generations/:id", { preHandler: withScope("generations:read") }, async (req, reply) => {
     try {
+      const ttlParsed = audioTtlQuerySchema.safeParse(req.query);
+      if (!ttlParsed.success) {
+        const requestId = requestIdFor(req);
+        return reply
+          .code(400)
+          .send(
+            buildError(
+              "validation_error",
+              "validation_failed",
+              "Invalid expires_in: integer seconds between 60 and 900.",
+              requestId,
+            ),
+          );
+      }
       const job = await getGenerationById(getPool(), req.apiAuth!.accountId, (req.params as { id: string }).id);
       const rate = await readRateCounters(getPool(), req.apiAuth!.accountId);
       await applyRateHeaders(reply, req.apiAuth!.planId, rate);
-      return reply.send(await withAudioUrl(job));
+      return reply.send(await withAudioUrl(job, ttlParsed.data.expires_in));
     } catch (err) {
       sendServiceError(reply, err);
     }

@@ -504,6 +504,11 @@ paths:
       tags: [generations]
       parameters:
         - $ref: '#/components/parameters/GenerationId'
+        - in: query
+          name: expires_in
+          required: false
+          description: Signed audio-URL TTL in seconds (3-min share links, e.g. 180). Range 60-900, default 900. Invalid values are 400.
+          schema: { type: integer, minimum: 60, maximum: 900, default: 900 }
       responses:
         '200':
           description: Job status and, when finished, the signed audio URL
@@ -515,6 +520,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Generation' }
+        '400':
+          description: Invalid expires_in (must be an integer 60-900)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
         '401': { $ref: '#/components/responses/InvalidKey' }
         '403': { $ref: '#/components/responses/InsufficientScope' }
         '404':

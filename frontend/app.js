@@ -500,6 +500,25 @@ $("btn-job-poll").addEventListener("click", () => {
 });
 $("btn-job-poll").textContent = "Auto-poll ON";
 
+/** 3-minute public share link: anyone holding it streams for 180s, no account. */
+$("btn-job-share").addEventListener("click", async () => {
+  if (!currentJobId) return toast("No job selected.");
+  try {
+    apiKeyFor();
+    const res = await fetch(`/v1/generations/${encodeURIComponent(currentJobId)}?expires_in=180`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) fail(data, res);
+    const url = data?.output?.audio_url;
+    if (!url) return toast("Job has no audio yet — wait for succeeded.");
+    await navigator.clipboard.writeText(url);
+    toast("3-min share link copied — works for anyone, expires in 3 minutes.", true);
+  } catch (err) {
+    toast(String(err.message || err));
+  }
+});
+
 /* ---------- cost preview ---------- */
 function updateCostPreview() {
   const cost = costFor($("gen-license").value, $("gen-duration").value);
