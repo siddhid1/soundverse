@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Soundverse — Platform Monitoring (operators)</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Soundverse — Platform Monitoring</h1>
+    <p class="muted">Operator console on a separate origin (<code>:5174</code>). No login, no stored
+    secrets: paste one Bearer key per account you operate. Each key fetches that account's existing
+    <code>GET /v1/monitoring</code> report and everything is totaled <b>in this page only</b> —
+    keys never leave the browser except to the API, nothing is written to storage, and the backend
+    is unchanged (no cross-account endpoint exists).</p>
+  </header>
+
+  <div id="toast" class="hidden"></div>
+
+  <main>
+    <section class="card">
+      <h2>Platform endpoint <span class="muted" id="ep-fresh">—</span></h2>
+      <p class="muted">Live totals from <code>GET /v1/platform/stats</code> — no keys needed.
+      If it is unreachable, the per-account watch below builds the same totals locally.</p>
+      <div class="toolbar">
+        <button type="button" id="btn-ep-reload">Reload</button>
+      </div>
+      <div class="stats" id="ep-totals"></div>
+      <div class="chips" id="ep-jobs"></div>
+      <div id="ep-license"></div>
+      <p class="muted" id="ep-note"></p>
+    </section>
+
+    <section class="card">
+      <h2>Accounts under watch</h2>
+      <label>Bearer key (page memory only — never stored)
+        <input id="op-key" type="password" placeholder="paste sv_test_… or sv_live_…" autocomplete="off" />
+      </label>
+      <div class="toolbar">
+        <button type="button" id="btn-add">Add account</button>
+        <button type="button" id="btn-reload">Reload all</button>
+        <button type="button" id="btn-clear">Forget all keys</button>
+        <label style="margin:0"><input type="checkbox" id="op-auto" style="width:auto" checked /> auto-refresh (30s)</label>
+      </div>
+      <p class="muted" id="op-keys-note">No accounts added yet. Paste a key to fetch its monitoring report.</p>
+      <table>
+        <thead><tr><th>account</th><th>plan</th><th>period</th><th>status</th><th></th></tr></thead>
+        <tbody id="op-rows"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Platform totals <span class="muted" id="op-fresh">—</span></h2>
+      <div class="stats" id="op-totals"></div>
+      <div class="chips" id="op-jobs"></div>
+      <p class="muted" id="op-formula"></p>
+    </section>
+
+    <section class="card">
+      <h2>Per account</h2>
+      <div id="op-per-account"><p class="muted">Add an account above.</p></div>
+    </section>
+
+    <section class="card">
+      <h2>Daily usage (summed, last 30 days)</h2>
+      <div class="mini-chart" id="op-chart"></div>
+      <div id="op-daily"><p class="muted">Add an account above.</p></div>
+    </section>
+
+    <section class="card">
+      <h2>Webhook deliveries (summed, last 24h)</h2>
+      <div id="op-webhooks"><p class="muted">Add an account above.</p></div>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

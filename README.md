@@ -30,12 +30,16 @@ npm run verify              # build + lint + spec + acceptance + full suite
 Browser console (no curl needed):
 
 ```bash
-cd frontend && npm install && npm run dev   # http://localhost:5173
+cd frontend && npm install && npm run dev   # http://localhost:5173 (user console)
+cd admin-console && npm install && npm run dev   # http://localhost:5174 (operator console)
 ```
 
-The static UI talks to the API through a dev-server proxy (`/auth`, `/keys`,
+The static UIs talk to the API through a dev-server proxy (`/auth`, `/keys`,
 `/audit-log`, `/v1` → `http://localhost:3000`), so sessions work with zero
-backend changes. Bearer keys live in page memory only. See `frontend/README.md`
+CORS changes. The operator console runs on a separate origin, so user and
+operator contexts never collide; its top section shows the keyless public
+`GET /v1/platform/stats` aggregates, with the per-account key-watch below it
+as the drill-down. Bearer keys live in page memory only. See `frontend/README.md`
 for the click-through checklist.
 
 Watch webhooks locally (verifies signatures, dedupes by `sv-event-id`, filters
@@ -100,7 +104,7 @@ npm test
 Integration tests boot a **real PostgreSQL 18** automatically (embedded binary
 in a temp dir; set `TEST_DATABASE_URL` to use your own, e.g. CI with compose).
 Concurrency tests synchronize real parallel requests (`Promise.all`) and assert
-final database + ledger state, not just response codes. 73 tests, all green.
+final database + ledger state, not just response codes. 79 tests, all green.
 
 ## Status (honest)
 
@@ -121,6 +125,7 @@ final database + ledger state, not just response codes. 73 tests, all green.
 | Storage (tenant-scoped keys, presigned expiring URLs) | ✅ working, e2e-verified |
 | Webhooks (created/progress/succeeded/failed/canceled, HMAC, retries, dead-letter, SSRF guards) | ✅ working, tested |
 | Monitoring (`GET /v1/monitoring`, `/keys/stats`: per-key songs, time, credits) | ✅ working, tested |
+| Platform stats (`GET /v1/platform/stats`: public aggregates, kill-switch, per-IP limit) + separate `:5174` operator console | ✅ working, tested |
 | Docs (OpenAPI 3.1 matching behavior, DECISIONS/AI_USAGE/SECURITY) | ✅ this repo |
 
 ### Known limitations (see DECISIONS.md / SECURITY.md for the full lists)
